@@ -1,0 +1,6 @@
+{
+  "name": "Mercurynotes",
+  "description": "Premium minimalist notes app with Apple-inspired frosted glass UI, rich formatting, folders, and offline search",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

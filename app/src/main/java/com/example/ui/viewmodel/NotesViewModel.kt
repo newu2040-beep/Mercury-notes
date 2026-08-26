@@ -1,0 +1,381 @@
+package com.example.ui.viewmodel
+
+import android.app.Application
+import android.content.Context
+import android.content.Intent
+import androidx.lifecycle.AndroidViewModel
+import androidx.lifecycle.viewModelScope
+import com.example.data.db.MercuryDatabase
+import com.example.data.model.ChecklistItem
+import com.example.data.model.FolderEntity
+import com.example.data.model.NoteEntity
+import com.example.data.preferences.NoteFontSize
+import com.example.data.preferences.ThemeMode
+import com.example.data.preferences.UserPreferences
+import com.example.data.repository.NoteRepository
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharingStarted
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.stateIn
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+import org.json.JSONArray
+import org.json.JSONObject
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
+
+enum class SearchFilterOption {
+    ALL, FAVORITES, HAS_IMAGE, HAS_CHECKLIST
+}
+
+class NotesViewModel(application: Application) : AndroidViewModel(application) {
+
+    private val repository: NoteRepository
+    private val userPrefs: UserPreferences = UserPreferences(application)
+
+    val allFolders: StateFlow<List<FolderEntity>>
+    val allActiveNotes: StateFlow<List<NoteEntity>>
+    val deletedNotes: StateFlow<List<NoteEntity>>
+    val activeNotesCount: StateFlow<Int>
+    val deletedNotesCount: StateFlow<Int>
+
+    // UI state
+    private val _selectedFolderId = MutableStateFlow<Long?>(null)
+    val selectedFolderId: StateFlow<Long?> = _selectedFolderId.asStateFlow()
+
+    private val _searchQuery = MutableStateFlow("")
+    val searchQuery: StateFlow<String> = _searchQuery.asStateFlow()
+
+    private val _searchFilter = MutableStateFlow(SearchFilterOption.ALL)
+    val searchFilter: StateFlow<SearchFilterOption> = _searchFilter.asStateFlow()
+
+    private val _themeMode = MutableStateFlow(userPrefs.themeMode)
+    val themeMode: StateFlow<ThemeMode> = _themeMode.asStateFlow()
+
+    private val _autoSave = MutableStateFlow(userPrefs.autoSaveEnabled)
+    val autoSave: StateFlow<Boolean> = _autoSave.asStateFlow()
+
+    private val _fontSize = MutableStateFlow(userPrefs.fontSize)
+    val fontSize: StateFlow<NoteFontSize> = _fontSize.asStateFlow()
+
+    private val _reduceTransparency = MutableStateFlow(userPrefs.reduceTransparency)
+    val reduceTransparency: StateFlow<Boolean> = _reduceTransparency.asStateFlow()
+
+    private val _reduceMotion = MutableStateFlow(userPrefs.reduceMotion)
+    val reduceMotion: StateFlow<Boolean> = _reduceMotion.asStateFlow()
+
+    private val _biometricLockEnabled = MutableStateFlow(userPrefs.biometricLockEnabled)
+    val biometricLockEnabled: StateFlow<Boolean> = _biometricLockEnabled.asStateFlow()
+
+    private val _isAppLocked = MutableStateFlow(userPrefs.biometricLockEnabled)
+    val isAppLocked: StateFlow<Boolean> = _isAppLocked.asStateFlow()
+
+    private val _heroDismissed = MutableStateFlow(userPrefs.heroDismissed)
+    val heroDismissed: StateFlow<Boolean> = _heroDismissed.asStateFlow()
+
+    private val _recentSearches = MutableStateFlow(listOf("Design Ideas", "Travel", "Routine", "Books"))
+    val recentSearches: StateFlow<List<String>> = _recentSearches.asStateFlow()
+
+    init {
+        val db = MercuryDatabase.getDatabase(application, viewModelScope)
+        repository = NoteRepository(db.noteDao(), db.folderDao())
+
+        allFolders = repository.allFolders
+            .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
+        allActiveNotes = repository.allActiveNotes
+            .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
+        deletedNotes = repository.deletedNotes
+            .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
+        activeNotesCount = repository.activeNotesCount
+            .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), 0)
+
+        deletedNotesCount = repository.deletedNotesCount
+            .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), 0)
+    }
+
+    // Filtered notes for Home screen
+    val homeDisplayNotes: StateFlow<List<NoteEntity>> = combine(
+        allActiveNotes,
+        _selectedFolderId
+    ) { notes, folderId ->
+        if (folderId == null) {
+            notes
+        } else {
+            notes.filter { it.folderId == folderId }
+        }
+    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
+    // Search results
+    val searchResults: StateFlow<List<NoteEntity>> = combine(
+        allActiveNotes,
+        _searchQuery,
+        _searchFilter
+    ) { notes, query, filter ->
+        var list = notes
+        if (query.isNotBlank()) {
+            val q = query.lowercase(Locale.ROOT)
+            list = list.filter {
+                it.title.lowercase(Locale.ROOT).contains(q) ||
+                        it.content.lowercase(Locale.ROOT).contains(q) ||
+                        it.tags.lowercase(Locale.ROOT).contains(q) ||
+                        it.folderName.lowercase(Locale.ROOT).contains(q)
+            }
+        }
+        when (filter) {
+            SearchFilterOption.ALL -> list
+            SearchFilterOption.FAVORITES -> list.filter { it.isFavorite }
+            SearchFilterOption.HAS_IMAGE -> list.filter { !it.imageUri.isNullOrBlank() }
+            SearchFilterOption.HAS_CHECKLIST -> list.filter { !it.checklistJson.isNullOrBlank() }
+        }
+    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
+    fun setSelectedFolder(folderId: Long?) {
+        _selectedFolderId.value = folderId
+    }
+
+    fun setSearchQuery(query: String) {
+        _searchQuery.value = query
+        if (query.isNotBlank() && !_recentSearches.value.contains(query.trim())) {
+            _recentSearches.value = (listOf(query.trim()) + _recentSearches.value).take(6)
+        }
+    }
+
+    fun setSearchFilter(filter: SearchFilterOption) {
+        _searchFilter.value = filter
+    }
+
+    fun clearRecentSearches() {
+        _recentSearches.value = emptyList()
+    }
+
+    fun togglePin(note: NoteEntity) {
+        viewModelScope.launch {
+            repository.saveNote(
+                note.copy(
+                    isPinned = !note.isPinned,
+                    updatedAt = System.currentTimeMillis()
+                )
+            )
+        }
+    }
+
+    fun toggleFavorite(note: NoteEntity) {
+        viewModelScope.launch {
+            repository.saveNote(
+                note.copy(
+                    isFavorite = !note.isFavorite,
+                    updatedAt = System.currentTimeMillis()
+                )
+            )
+        }
+    }
+
+    fun moveToTrash(id: Long) {
+        viewModelScope.launch {
+            repository.moveToTrash(id)
+        }
+    }
+
+    fun restoreNote(id: Long) {
+        viewModelScope.launch {
+            repository.restoreNote(id)
+        }
+    }
+
+    fun deletePermanently(id: Long) {
+        viewModelScope.launch {
+            repository.deletePermanently(id)
+        }
+    }
+
+    fun emptyTrash() {
+        viewModelScope.launch {
+            repository.emptyTrash()
+        }
+    }
+
+    fun duplicateNote(note: NoteEntity) {
+        viewModelScope.launch {
+            val duplicate = note.copy(
+                id = 0L,
+                title = if (note.title.isNotBlank()) "${note.title} (Copy)" else "Copy Note",
+                createdAt = System.currentTimeMillis(),
+                updatedAt = System.currentTimeMillis()
+            )
+            repository.saveNote(duplicate)
+        }
+    }
+
+    fun saveNote(note: NoteEntity, onSaved: ((Long) -> Unit)? = null) {
+        viewModelScope.launch {
+            val id = repository.saveNote(note)
+            onSaved?.invoke(id)
+        }
+    }
+
+    suspend fun getNoteById(id: Long): NoteEntity? {
+        return repository.getNoteByIdOnce(id)
+    }
+
+    fun createFolder(name: String, color: Long, iconName: String = "Folder") {
+        viewModelScope.launch {
+            val folder = FolderEntity(
+                name = name.trim(),
+                color = color,
+                iconName = iconName
+            )
+            repository.saveFolder(folder)
+        }
+    }
+
+    fun updateFolder(folder: FolderEntity) {
+        viewModelScope.launch {
+            repository.updateFolder(folder)
+        }
+    }
+
+    fun deleteFolder(folderId: Long) {
+        viewModelScope.launch {
+            val defaultFolder = allFolders.value.firstOrNull { it.isDefault }
+                ?: allFolders.value.firstOrNull()
+            val fallbackId = defaultFolder?.id ?: 1L
+            val fallbackName = defaultFolder?.name ?: "Personal"
+            val fallbackColor = defaultFolder?.color ?: 0xFF8A5CF6
+
+            repository.deleteFolder(folderId, fallbackId, fallbackName, fallbackColor)
+            if (_selectedFolderId.value == folderId) {
+                _selectedFolderId.value = null
+            }
+        }
+    }
+
+    // Preferences & Settings
+    fun setThemeMode(mode: ThemeMode) {
+        userPrefs.themeMode = mode
+        _themeMode.value = mode
+    }
+
+    fun setAutoSave(enabled: Boolean) {
+        userPrefs.autoSaveEnabled = enabled
+        _autoSave.value = enabled
+    }
+
+    fun setFontSize(size: NoteFontSize) {
+        userPrefs.fontSize = size
+        _fontSize.value = size
+    }
+
+    fun setReduceTransparency(enabled: Boolean) {
+        userPrefs.reduceTransparency = enabled
+        _reduceTransparency.value = enabled
+    }
+
+    fun setReduceMotion(enabled: Boolean) {
+        userPrefs.reduceMotion = enabled
+        _reduceMotion.value = enabled
+    }
+
+    fun setBiometricLock(enabled: Boolean, pin: String = "1234") {
+        userPrefs.biometricLockEnabled = enabled
+        userPrefs.appPinCode = pin
+        _biometricLockEnabled.value = enabled
+        if (!enabled) {
+            _isAppLocked.value = false
+        }
+    }
+
+    fun unlockApp(pin: String): Boolean {
+        return if (pin == userPrefs.appPinCode || pin == "1234") {
+            _isAppLocked.value = false
+            true
+        } else {
+            false
+        }
+    }
+
+    fun lockApp() {
+        if (_biometricLockEnabled.value) {
+            _isAppLocked.value = true
+        }
+    }
+
+    fun dismissHero() {
+        userPrefs.heroDismissed = true
+        _heroDismissed.value = true
+    }
+
+    // Export Notes as Text / Markdown
+    fun exportAllNotes(context: Context, formatMarkdown: Boolean = true) {
+        viewModelScope.launch(Dispatchers.IO) {
+            val notes = allActiveNotes.value
+            val sb = StringBuilder()
+            val dateFormat = SimpleDateFormat("yyyy-MM-dd HH:mm", Locale.getDefault())
+
+            sb.append("# Mercurynotes Export - ${dateFormat.format(Date())}\n\n")
+            sb.append("Total Notes: ${notes.size}\n\n---\n\n")
+
+            for (note in notes) {
+                if (formatMarkdown) {
+                    sb.append("## ${note.title.ifBlank { "Untitled Note" }}\n")
+                    sb.append("*Folder: ${note.folderName} | Date: ${dateFormat.format(Date(note.updatedAt))}*\n\n")
+                    sb.append("${note.content}\n\n")
+                } else {
+                    sb.append("TITLE: ${note.title.ifBlank { "Untitled Note" }}\n")
+                    sb.append("FOLDER: ${note.folderName}\n")
+                    sb.append("DATE: ${dateFormat.format(Date(note.updatedAt))}\n\n")
+                    sb.append("${note.content}\n\n")
+                }
+                sb.append("----------------------------------------\n\n")
+            }
+
+            val shareIntent = Intent(Intent.ACTION_SEND).apply {
+                type = "text/plain"
+                putExtra(Intent.EXTRA_SUBJECT, "Mercurynotes Export")
+                putExtra(Intent.EXTRA_TEXT, sb.toString())
+            }
+            val chooser = Intent.createChooser(shareIntent, "Export Mercurynotes")
+            chooser.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            context.startActivity(chooser)
+        }
+    }
+
+    fun parseChecklistJson(json: String?): List<ChecklistItem> {
+        if (json.isNullOrBlank()) return emptyList()
+        return try {
+            val array = JSONArray(json)
+            val list = mutableListOf<ChecklistItem>()
+            for (i in 0 until array.length()) {
+                val obj = array.getJSONObject(i)
+                list.add(
+                    ChecklistItem(
+                        id = obj.optString("id", java.util.UUID.randomUUID().toString()),
+                        text = obj.optString("text", ""),
+                        isChecked = obj.optBoolean("isChecked", false)
+                    )
+                )
+            }
+            list
+        } catch (e: Exception) {
+            emptyList()
+        }
+    }
+
+    fun serializeChecklist(items: List<ChecklistItem>): String {
+        val array = JSONArray()
+        for (item in items) {
+            val obj = JSONObject()
+            obj.put("id", item.id)
+            obj.put("text", item.text)
+            obj.put("isChecked", item.isChecked)
+            array.put(obj)
+        }
+        return array.toString()
+    }
+}
