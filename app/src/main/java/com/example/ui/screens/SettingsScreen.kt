@@ -1,8 +1,16 @@
 package com.example.ui.screens
 
+import android.Manifest
 import android.content.Context
+import android.net.Uri
+import android.os.Build
+import android.widget.Toast
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -17,24 +25,35 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyRow
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowForwardIos
+import androidx.compose.material.icons.automirrored.filled.InsertDriveFile
 import androidx.compose.material.icons.filled.Animation
-import androidx.compose.material.icons.filled.AutoMode
-import androidx.compose.material.icons.filled.DarkMode
+import androidx.compose.material.icons.filled.AttachFile
+import androidx.compose.material.icons.filled.AutoAwesome
+import androidx.compose.material.icons.filled.CameraAlt
+import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.ColorLens
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.DeleteSweep
+import androidx.compose.material.icons.filled.Favorite
 import androidx.compose.material.icons.filled.Fingerprint
 import androidx.compose.material.icons.filled.FormatSize
 import androidx.compose.material.icons.filled.Info
-import androidx.compose.material.icons.filled.LightMode
+import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material.icons.filled.Notifications
 import androidx.compose.material.icons.filled.Opacity
+import androidx.compose.material.icons.filled.Palette
+import androidx.compose.material.icons.filled.PhotoLibrary
 import androidx.compose.material.icons.filled.Save
+import androidx.compose.material.icons.filled.Security
 import androidx.compose.material.icons.filled.Share
-import androidx.compose.material.icons.filled.Star
+import androidx.compose.material.icons.filled.StayCurrentPortrait
+import androidx.compose.material.icons.filled.TextFields
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
@@ -54,6 +73,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.ContentScale
@@ -63,9 +83,11 @@ import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.fragment.app.FragmentActivity
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.example.R
 import com.example.data.preferences.NoteFontSize
+import com.example.data.preferences.PastelThemePreset
 import com.example.data.preferences.ThemeMode
 import com.example.ui.components.GlassCard
 import com.example.ui.components.SegmentedThemeControl
@@ -74,6 +96,8 @@ import com.example.ui.theme.MercuryPink
 import com.example.ui.theme.MercuryTheme
 import com.example.ui.theme.MercuryViolet
 import com.example.ui.viewmodel.NotesViewModel
+import com.example.util.BiometricAuthHelper
+import com.example.util.FileImporter
 
 @Composable
 fun SettingsScreen(
@@ -83,7 +107,13 @@ fun SettingsScreen(
 ) {
     val context = LocalContext.current
     val glass = MercuryTheme.glass
+    val isCompact = MercuryTheme.isCompact
+    val fontScale = MercuryTheme.fontScale
+
     val themeMode by viewModel.themeMode.collectAsStateWithLifecycle()
+    val pastelTheme by viewModel.pastelTheme.collectAsStateWithLifecycle()
+    val liquidGlassEnabled by viewModel.liquidGlassEnabled.collectAsStateWithLifecycle()
+    val compactMode by viewModel.compactMode.collectAsStateWithLifecycle()
     val autoSave by viewModel.autoSave.collectAsStateWithLifecycle()
     val fontSize by viewModel.fontSize.collectAsStateWithLifecycle()
     val reduceTransparency by viewModel.reduceTransparency.collectAsStateWithLifecycle()
@@ -93,7 +123,33 @@ fun SettingsScreen(
 
     var showPinDialog by remember { mutableStateOf(false) }
     var showAboutDialog by remember { mutableStateOf(false) }
+    var showPermissionsDialog by remember { mutableStateOf(false) }
+    var showClearDataDialog by remember { mutableStateOf(false) }
     var pinInput by remember { mutableStateOf("") }
+
+    // Universal File Picker Launcher for Settings
+    val filePickerLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.GetContent()
+    ) { uri: Uri? ->
+        if (uri != null) {
+            val imported = FileImporter.parseImportedUri(context, uri)
+            viewModel.importNoteData(imported) { newId ->
+                Toast.makeText(context, "Imported as new note: ${imported.title}", Toast.LENGTH_SHORT).show()
+            }
+        }
+    }
+
+    // Permission request launcher
+    val permissionsLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.RequestMultiplePermissions()
+    ) { permissionsMap ->
+        val allGranted = permissionsMap.values.all { it }
+        if (allGranted) {
+            Toast.makeText(context, "All requested permissions granted!", Toast.LENGTH_SHORT).show()
+        } else {
+            Toast.makeText(context, "Permissions updated", Toast.LENGTH_SHORT).show()
+        }
+    }
 
     Box(
         modifier = modifier
@@ -102,7 +158,12 @@ fun SettingsScreen(
     ) {
         LazyColumn(
             modifier = Modifier.fillMaxSize(),
-            contentPadding = PaddingValues(bottom = 100.dp)
+            contentPadding = PaddingValues(
+                start = if (isCompact) 12.dp else 16.dp,
+                end = if (isCompact) 12.dp else 16.dp,
+                top = if (isCompact) 12.dp else 20.dp,
+                bottom = 120.dp
+            )
         ) {
             // Header
             item {
@@ -111,133 +172,174 @@ fun SettingsScreen(
                     style = MaterialTheme.typography.displayMedium,
                     color = glass.textPrimary,
                     fontWeight = FontWeight.Bold,
-                    modifier = Modifier.padding(start = 20.dp, end = 20.dp, top = 20.dp, bottom = 16.dp)
+                    modifier = Modifier.padding(bottom = 16.dp)
                 )
             }
 
-            // Appearance Section
+            // Pastel Themes Palette Selector
             item {
-                SettingsSectionHeader("Appearance")
+                SettingsSectionHeader("Pastel Color Themes")
 
                 GlassCard(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(horizontal = 20.dp, vertical = 6.dp),
-                    shape = RoundedCornerShape(22.dp),
+                        .padding(vertical = 4.dp),
+                    shape = RoundedCornerShape(20.dp),
                     backgroundColor = glass.cardBackground
                 ) {
-                    Column(modifier = Modifier.padding(16.dp)) {
+                    Column(modifier = Modifier.padding(14.dp)) {
                         Text(
-                            text = "Theme Mode",
+                            text = "Choose Visual Theme",
                             style = MaterialTheme.typography.titleSmall,
                             color = glass.textPrimary,
                             fontWeight = FontWeight.SemiBold
                         )
-                        Spacer(modifier = Modifier.height(10.dp))
-
-                        SegmentedThemeControl(
-                            selectedOption = when (themeMode) {
-                                ThemeMode.LIGHT -> 0
-                                ThemeMode.DARK -> 1
-                                ThemeMode.SYSTEM -> 2
-                            },
-                            options = listOf("Light", "Dark", "System"),
-                            onSelect = { index ->
-                                val mode = when (index) {
-                                    0 -> ThemeMode.LIGHT
-                                    1 -> ThemeMode.DARK
-                                    else -> ThemeMode.SYSTEM
-                                }
-                                viewModel.setThemeMode(mode)
-                            }
+                        Spacer(modifier = Modifier.height(4.dp))
+                        Text(
+                            text = "Curated pastel palettes with frosted glass lighting",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = glass.textMuted
                         )
+                        Spacer(modifier = Modifier.height(12.dp))
+
+                        LazyRow(
+                            horizontalArrangement = Arrangement.spacedBy(10.dp),
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            items(PastelThemePreset.values()) { preset ->
+                                val isSelected = pastelTheme == preset
+                                val (color1, color2) = getThemeSwatchColors(preset)
+
+                                Column(
+                                    horizontalAlignment = Alignment.CenterHorizontally,
+                                    modifier = Modifier
+                                        .clip(RoundedCornerShape(14.dp))
+                                        .clickable { viewModel.setPastelTheme(preset) }
+                                        .padding(4.dp)
+                                ) {
+                                    Box(
+                                        modifier = Modifier
+                                            .size(52.dp)
+                                            .clip(RoundedCornerShape(14.dp))
+                                            .background(Brush.linearGradient(listOf(color1, color2)))
+                                            .border(
+                                                width = if (isSelected) 3.dp else 1.dp,
+                                                color = if (isSelected) MercuryViolet else glass.cardBorder,
+                                                shape = RoundedCornerShape(14.dp)
+                                            ),
+                                        contentAlignment = Alignment.Center
+                                    ) {
+                                        if (isSelected) {
+                                            Icon(
+                                                imageVector = Icons.Default.Check,
+                                                contentDescription = "Selected",
+                                                tint = Color.White,
+                                                modifier = Modifier.size(22.dp)
+                                            )
+                                        }
+                                    }
+                                    Spacer(modifier = Modifier.height(6.dp))
+                                    Text(
+                                        text = preset.displayName.replace("Pastel ", "").replace("Liquid Glass ", ""),
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = if (isSelected) glass.textPrimary else glass.textMuted,
+                                        fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal
+                                    )
+                                }
+                            }
+                        }
                     }
                 }
-                Spacer(modifier = Modifier.height(14.dp))
+                Spacer(modifier = Modifier.height(12.dp))
             }
 
-            // Preferences Section
+            // Appearance & Glass Effects
             item {
-                SettingsSectionHeader("Preferences")
+                SettingsSectionHeader("Appearance & Glass Effects")
 
                 GlassCard(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(horizontal = 20.dp, vertical = 6.dp),
-                    shape = RoundedCornerShape(22.dp),
+                        .padding(vertical = 4.dp),
+                    shape = RoundedCornerShape(20.dp),
                     backgroundColor = glass.cardBackground
                 ) {
                     Column(modifier = Modifier.padding(vertical = 4.dp)) {
-                        SettingsToggleRow(
-                            icon = Icons.Default.Save,
-                            iconColor = MercuryViolet,
-                            title = "Auto Save",
-                            subtitle = "Automatically save notes while typing",
-                            checked = autoSave,
-                            onCheckedChange = { viewModel.setAutoSave(it) }
-                        )
+                        // Theme Mode Light/Dark/System
+                        Column(modifier = Modifier.padding(horizontal = 16.dp, vertical = 10.dp)) {
+                            Text(
+                                text = "Light & Dark Appearance",
+                                style = MaterialTheme.typography.titleSmall,
+                                color = glass.textPrimary,
+                                fontWeight = FontWeight.SemiBold
+                            )
+                            Spacer(modifier = Modifier.height(10.dp))
+                            SegmentedThemeControl(
+                                selectedOption = when (themeMode) {
+                                    ThemeMode.LIGHT -> 0
+                                    ThemeMode.DARK -> 1
+                                    ThemeMode.SYSTEM -> 2
+                                },
+                                options = listOf("Light", "Dark", "System"),
+                                onSelect = { index ->
+                                    val mode = when (index) {
+                                        0 -> ThemeMode.LIGHT
+                                        1 -> ThemeMode.DARK
+                                        else -> ThemeMode.SYSTEM
+                                    }
+                                    viewModel.setThemeMode(mode)
+                                }
+                            )
+                        }
 
-                        HorizontalDivider(
-                            modifier = Modifier.padding(horizontal = 16.dp),
-                            color = glass.dividerColor
-                        )
+                        HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp), color = glass.dividerColor)
 
+                        // True Liquid Glass Effect Toggle
                         SettingsToggleRow(
                             icon = Icons.Default.Opacity,
-                            iconColor = MercuryBlue,
-                            title = "Reduce Transparency",
-                            subtitle = "Use solid background cards for readability",
-                            checked = reduceTransparency,
-                            onCheckedChange = { viewModel.setReduceTransparency(it) }
+                            iconColor = MercuryViolet,
+                            title = "True Liquid Glass Effect",
+                            subtitle = "Dynamic chromatic refraction & specular lighting",
+                            checked = liquidGlassEnabled,
+                            onCheckedChange = { viewModel.setLiquidGlassEnabled(it) }
                         )
 
-                        HorizontalDivider(
-                            modifier = Modifier.padding(horizontal = 16.dp),
-                            color = glass.dividerColor
+                        HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp), color = glass.dividerColor)
+
+                        // Compact Mode for Small Displays
+                        SettingsToggleRow(
+                            icon = Icons.Default.StayCurrentPortrait,
+                            iconColor = MercuryBlue,
+                            title = "Compact Mode",
+                            subtitle = "Optimized padding & density for smaller displays",
+                            checked = compactMode,
+                            onCheckedChange = { viewModel.setCompactMode(it) }
                         )
+
+                        HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp), color = glass.dividerColor)
 
                         SettingsToggleRow(
                             icon = Icons.Default.Animation,
                             iconColor = MercuryPink,
-                            title = "Reduce Motion",
-                            subtitle = "Simplify screen transitions and motion",
-                            checked = reduceMotion,
-                            onCheckedChange = { viewModel.setReduceMotion(it) }
-                        )
-
-                        HorizontalDivider(
-                            modifier = Modifier.padding(horizontal = 16.dp),
-                            color = glass.dividerColor
-                        )
-
-                        SettingsToggleRow(
-                            icon = Icons.Default.Fingerprint,
-                            iconColor = Color(0xFF10B981),
-                            title = "App Lock / Biometrics",
-                            subtitle = "Require PIN or biometric auth to access app",
-                            checked = biometricLock,
-                            onCheckedChange = { checked ->
-                                if (checked) {
-                                    showPinDialog = true
-                                } else {
-                                    viewModel.setBiometricLock(false)
-                                }
-                            }
+                            title = "Reduce Transparency",
+                            subtitle = "Use solid background cards for maximum contrast",
+                            checked = reduceTransparency,
+                            onCheckedChange = { viewModel.setReduceTransparency(it) }
                         )
                     }
                 }
-                Spacer(modifier = Modifier.height(14.dp))
+                Spacer(modifier = Modifier.height(12.dp))
             }
 
-            // Font Size Section
+            // Typography & Dynamic Font Size (FIXED & RESPONSIVE)
             item {
-                SettingsSectionHeader("Typography")
+                SettingsSectionHeader("Typography & Scale")
 
                 GlassCard(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(horizontal = 20.dp, vertical = 6.dp),
-                    shape = RoundedCornerShape(22.dp),
+                        .padding(vertical = 4.dp),
+                    shape = RoundedCornerShape(20.dp),
                     backgroundColor = glass.cardBackground
                 ) {
                     Column(modifier = Modifier.padding(16.dp)) {
@@ -250,7 +352,7 @@ fun SettingsScreen(
                                 Icon(Icons.Default.FormatSize, contentDescription = null, tint = MercuryViolet)
                                 Spacer(modifier = Modifier.width(10.dp))
                                 Text(
-                                    text = "Editor Font Size",
+                                    text = "Dynamic Font Scaling",
                                     style = MaterialTheme.typography.titleSmall,
                                     color = glass.textPrimary,
                                     fontWeight = FontWeight.SemiBold
@@ -271,79 +373,162 @@ fun SettingsScreen(
                                 NoteFontSize.SMALL -> 0
                                 NoteFontSize.MEDIUM -> 1
                                 NoteFontSize.LARGE -> 2
+                                NoteFontSize.EXTRA_LARGE -> 3
                             },
-                            options = listOf("Small", "Standard", "Large"),
+                            options = listOf("Small", "Medium", "Large", "XL"),
                             onSelect = { index ->
                                 val size = when (index) {
                                     0 -> NoteFontSize.SMALL
                                     1 -> NoteFontSize.MEDIUM
-                                    else -> NoteFontSize.LARGE
+                                    2 -> NoteFontSize.LARGE
+                                    else -> NoteFontSize.EXTRA_LARGE
                                 }
                                 viewModel.setFontSize(size)
                             }
                         )
+
+                        Spacer(modifier = Modifier.height(12.dp))
+
+                        // Live Preview Box showing the scaled font
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clip(RoundedCornerShape(12.dp))
+                                .background(glass.searchBarBackground)
+                                .padding(12.dp)
+                        ) {
+                            Text(
+                                text = "Preview: The quick brown fox jumps over the lazy dog.",
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = glass.textPrimary
+                            )
+                        }
                     }
                 }
-                Spacer(modifier = Modifier.height(14.dp))
+                Spacer(modifier = Modifier.height(12.dp))
             }
 
-            // Data & Storage
+            // Security, Biometrics & PIN Lock
             item {
-                SettingsSectionHeader("Data & Storage")
+                SettingsSectionHeader("Security & System Access")
 
                 GlassCard(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(horizontal = 20.dp, vertical = 6.dp),
-                    shape = RoundedCornerShape(22.dp),
+                        .padding(vertical = 4.dp),
+                    shape = RoundedCornerShape(20.dp),
+                    backgroundColor = glass.cardBackground
+                ) {
+                    Column(modifier = Modifier.padding(vertical = 4.dp)) {
+                        SettingsToggleRow(
+                            icon = Icons.Default.Fingerprint,
+                            iconColor = Color(0xFF10B981),
+                            title = "Native Biometric & Face Lock",
+                            subtitle = "Hardware face unlock, fingerprint or device PIN",
+                            checked = biometricLock,
+                            onCheckedChange = { checked ->
+                                if (checked) {
+                                    val activity = context as? FragmentActivity
+                                    if (activity != null && BiometricAuthHelper.isBiometricAvailable(context)) {
+                                        BiometricAuthHelper.promptBiometricUnlock(
+                                            activity = activity,
+                                            title = "Set Up Biometric Lock",
+                                            subtitle = "Verify Face or Fingerprint to enable",
+                                            onSuccess = {
+                                                viewModel.setBiometricLock(true)
+                                                Toast.makeText(context, "Biometric Lock Enabled!", Toast.LENGTH_SHORT).show()
+                                            },
+                                            onError = { err ->
+                                                showPinDialog = true
+                                            }
+                                        )
+                                    } else {
+                                        showPinDialog = true
+                                    }
+                                } else {
+                                    viewModel.setBiometricLock(false)
+                                }
+                            }
+                        )
+
+                        HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp), color = glass.dividerColor)
+
+                        SettingsNavRow(
+                            icon = Icons.Default.Security,
+                            iconColor = MercuryViolet,
+                            title = "App Permissions Manager",
+                            subtitle = "Notifications, Gallery, Mic & Camera full access",
+                            onClick = { showPermissionsDialog = true }
+                        )
+
+                        HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp), color = glass.dividerColor)
+
+                        SettingsToggleRow(
+                            icon = Icons.Default.Save,
+                            iconColor = MercuryBlue,
+                            title = "Auto Save Notes",
+                            subtitle = "Instant background persistence while typing",
+                            checked = autoSave,
+                            onCheckedChange = { viewModel.setAutoSave(it) }
+                        )
+                    }
+                }
+                Spacer(modifier = Modifier.height(12.dp))
+            }
+
+            // Universal File Import, Export & Data Management
+            item {
+                SettingsSectionHeader("Data & Document Management")
+
+                GlassCard(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(vertical = 4.dp),
+                    shape = RoundedCornerShape(20.dp),
                     backgroundColor = glass.cardBackground
                 ) {
                     Column(modifier = Modifier.padding(vertical = 4.dp)) {
                         SettingsNavRow(
+                            icon = Icons.Default.AttachFile,
+                            iconColor = MercuryViolet,
+                            title = "Import Files, Fonts & Documents",
+                            subtitle = "Supports PDF, TXT, CSV, JSON, ZIP, TTF/OTF, Images",
+                            onClick = { filePickerLauncher.launch("*/*") }
+                        )
+
+                        HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp), color = glass.dividerColor)
+
+                        SettingsNavRow(
                             icon = Icons.Default.Delete,
                             iconColor = Color(0xFFEF4444),
-                            title = "Recently Deleted",
+                            title = "Recently Deleted (Trash)",
                             badge = if (deletedCount > 0) "$deletedCount" else null,
                             onClick = onOpenTrash
                         )
 
-                        HorizontalDivider(
-                            modifier = Modifier.padding(horizontal = 16.dp),
-                            color = glass.dividerColor
-                        )
+                        HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp), color = glass.dividerColor)
 
                         SettingsNavRow(
-                            icon = Icons.Default.Share,
-                            iconColor = MercuryViolet,
-                            title = "Export All Notes (Markdown)",
-                            onClick = { viewModel.exportAllNotes(context, formatMarkdown = true) }
-                        )
-
-                        HorizontalDivider(
-                            modifier = Modifier.padding(horizontal = 16.dp),
-                            color = glass.dividerColor
-                        )
-
-                        SettingsNavRow(
-                            icon = Icons.Default.Share,
-                            iconColor = MercuryBlue,
-                            title = "Export All Notes (Plain Text)",
-                            onClick = { viewModel.exportAllNotes(context, formatMarkdown = false) }
+                            icon = Icons.Default.DeleteSweep,
+                            iconColor = Color(0xFFEF4444),
+                            title = "Clear Sample Data / Reset Database",
+                            subtitle = "Wipe demo notes and start with clean real data",
+                            onClick = { showClearDataDialog = true }
                         )
                     }
                 }
-                Spacer(modifier = Modifier.height(14.dp))
+                Spacer(modifier = Modifier.height(12.dp))
             }
 
-            // About Section
+            // About & Developer Credits
             item {
-                SettingsSectionHeader("About")
+                SettingsSectionHeader("About & Credits")
 
                 GlassCard(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(horizontal = 20.dp, vertical = 6.dp),
-                    shape = RoundedCornerShape(22.dp),
+                        .padding(vertical = 4.dp),
+                    shape = RoundedCornerShape(20.dp),
                     backgroundColor = glass.cardBackground
                 ) {
                     Column(modifier = Modifier.padding(vertical = 4.dp)) {
@@ -351,7 +536,7 @@ fun SettingsScreen(
                             icon = Icons.Default.Info,
                             iconColor = MercuryPink,
                             title = "About Mercurynotes",
-                            subtitle = "Version 1.0.0",
+                            subtitle = "Made with ❤️ by Rahul Shah",
                             onClick = { showAboutDialog = true }
                         )
                     }
@@ -361,18 +546,76 @@ fun SettingsScreen(
                 Column(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(top = 24.dp, bottom = 16.dp),
+                        .padding(top = 20.dp, bottom = 16.dp),
                     horizontalAlignment = Alignment.CenterHorizontally
                 ) {
                     Text(
-                        text = "Mercurynotes — Think. Write. Organize.",
-                        style = MaterialTheme.typography.labelMedium,
-                        color = glass.textMuted,
-                        fontWeight = FontWeight.Medium
+                        text = "Made with ❤️ by Rahul Shah",
+                        style = MaterialTheme.typography.titleSmall,
+                        color = MercuryViolet,
+                        fontWeight = FontWeight.Bold
+                    )
+                    Spacer(modifier = Modifier.height(4.dp))
+                    Text(
+                        text = "Mercurynotes • Liquid Glass Note Experience",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = glass.textMuted
                     )
                 }
             }
         }
+    }
+
+    // Permissions Dialog
+    if (showPermissionsDialog) {
+        AlertDialog(
+            onDismissRequest = { showPermissionsDialog = false },
+            title = { Text("App Permissions & Full Access", fontWeight = FontWeight.Bold) },
+            text = {
+                Column {
+                    Text(
+                        text = "Mercurynotes uses system permissions to give you full capability:",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = glass.textSecondary
+                    )
+                    Spacer(modifier = Modifier.height(14.dp))
+
+                    PermissionItemRow(Icons.Default.Notifications, MercuryViolet, "Notifications", "Real-time task reminders and auto-save updates")
+                    Spacer(modifier = Modifier.height(8.dp))
+                    PermissionItemRow(Icons.Default.PhotoLibrary, MercuryBlue, "Photos & Gallery", "Attach photos and media directly to your notes")
+                    Spacer(modifier = Modifier.height(8.dp))
+                    PermissionItemRow(Icons.Default.Mic, MercuryPink, "Microphone", "Voice dictation and hands-free speech-to-text")
+                    Spacer(modifier = Modifier.height(8.dp))
+                    PermissionItemRow(Icons.Default.CameraAlt, Color(0xFF10B981), "Camera", "Capture documents and receipts into notes")
+                }
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        showPermissionsDialog = false
+                        val permissionsList = mutableListOf(
+                            Manifest.permission.RECORD_AUDIO,
+                            Manifest.permission.CAMERA
+                        )
+                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                            permissionsList.add(Manifest.permission.POST_NOTIFICATIONS)
+                            permissionsList.add(Manifest.permission.READ_MEDIA_IMAGES)
+                        } else {
+                            permissionsList.add(Manifest.permission.READ_EXTERNAL_STORAGE)
+                        }
+                        permissionsLauncher.launch(permissionsList.toTypedArray())
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = MercuryViolet)
+                ) {
+                    Text("Grant Full Access")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showPermissionsDialog = false }) {
+                    Text("Close")
+                }
+            }
+        )
     }
 
     // Set PIN dialog
@@ -401,10 +644,11 @@ fun SettingsScreen(
                         val pin = if (pinInput.isNotBlank()) pinInput else "1234"
                         viewModel.setBiometricLock(true, pin)
                         showPinDialog = false
+                        Toast.makeText(context, "App Lock enabled with PIN!", Toast.LENGTH_SHORT).show()
                     },
                     colors = ButtonDefaults.buttonColors(containerColor = MercuryViolet)
                 ) {
-                    Text("Enable")
+                    Text("Enable PIN")
                 }
             },
             dismissButton = {
@@ -415,7 +659,35 @@ fun SettingsScreen(
         )
     }
 
-    // About Dialog
+    // Clear Data confirmation dialog
+    if (showClearDataDialog) {
+        AlertDialog(
+            onDismissRequest = { showClearDataDialog = false },
+            title = { Text("Clear All Notes?", fontWeight = FontWeight.Bold, color = Color(0xFFEF4444)) },
+            text = {
+                Text("This will remove all sample notes from the database, giving you a clean slate to add your own real notes and files.")
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        viewModel.deleteAllNotes()
+                        showClearDataDialog = false
+                        Toast.makeText(context, "Database cleared! Ready for real notes.", Toast.LENGTH_LONG).show()
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFEF4444))
+                ) {
+                    Text("Clear All")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showClearDataDialog = false }) {
+                    Text("Cancel")
+                }
+            }
+        )
+    }
+
+    // About Dialog with Developer Credit
     if (showAboutDialog) {
         AlertDialog(
             onDismissRequest = { showAboutDialog = false },
@@ -436,20 +708,26 @@ fun SettingsScreen(
             text = {
                 Column {
                     Text(
-                        text = "Think. Write. Organize.",
-                        fontWeight = FontWeight.SemiBold,
+                        text = "Made with ❤️ by Rahul Shah",
+                        fontWeight = FontWeight.Bold,
                         color = MercuryViolet,
-                        fontSize = 15.sp
+                        fontSize = 16.sp
                     )
                     Spacer(modifier = Modifier.height(8.dp))
                     Text(
-                        text = "A premium minimalist notes application designed with frosted glass aesthetics, smooth 60 FPS performance, rich formatting, and local offline Room database storage.",
+                        text = "A modern, liquid glass note-taking powerhouse crafted for maximum fluidity and productivity.",
                         style = MaterialTheme.typography.bodyMedium,
                         color = glass.textSecondary
                     )
-                    Spacer(modifier = Modifier.height(12.dp))
+                    Spacer(modifier = Modifier.height(10.dp))
                     Text(
-                        text = "Version 1.0.0 • 2026",
+                        text = "• True Liquid Glass Chromatic Themes\n• Real-Time Voice Typing\n• Native Biometric & Face Lock\n• Universal File Import (PDF, TXT, CSV, JSON, Fonts)\n• Multi-Format Export (PDF, CSV, TXT, Markdown, JSON)\n• Compact Layout Mode",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = glass.textMuted
+                    )
+                    Spacer(modifier = Modifier.height(10.dp))
+                    Text(
+                        text = "Version 1.0.0 (Release 2026)",
                         style = MaterialTheme.typography.labelSmall,
                         color = glass.textMuted
                     )
@@ -460,10 +738,44 @@ fun SettingsScreen(
                     onClick = { showAboutDialog = false },
                     colors = ButtonDefaults.buttonColors(containerColor = MercuryViolet)
                 ) {
-                    Text("Close")
+                    Text("Awesome")
                 }
             }
         )
+    }
+}
+
+@Composable
+fun PermissionItemRow(icon: ImageVector, iconColor: Color, title: String, description: String) {
+    val glass = MercuryTheme.glass
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        Box(
+            modifier = Modifier
+                .size(30.dp)
+                .clip(CircleShape)
+                .background(iconColor.copy(alpha = 0.15f)),
+            contentAlignment = Alignment.Center
+        ) {
+            Icon(icon, contentDescription = null, tint = iconColor, modifier = Modifier.size(16.dp))
+        }
+        Spacer(modifier = Modifier.width(10.dp))
+        Column {
+            Text(title, style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold, color = glass.textPrimary)
+            Text(description, style = MaterialTheme.typography.bodySmall, color = glass.textMuted)
+        }
+    }
+}
+
+fun getThemeSwatchColors(preset: PastelThemePreset): Pair<Color, Color> {
+    return when (preset) {
+        PastelThemePreset.MERCURY -> Color(0xFF8B5CF6) to Color(0xFF3B82F6)
+        PastelThemePreset.LAVENDER -> Color(0xFFA78BFA) to Color(0xFFC084FC)
+        PastelThemePreset.PEACH -> Color(0xFFFB923C) to Color(0xFFF472B6)
+        PastelThemePreset.MINT -> Color(0xFF34D399) to Color(0xFF2DD4BF)
+        PastelThemePreset.ROSE -> Color(0xFFF472B6) to Color(0xFFFB7185)
+        PastelThemePreset.OCEAN -> Color(0xFF38BDF8) to Color(0xFF818CF8)
+        PastelThemePreset.LIQUID_OPAL -> Color(0xFF818CF8) to Color(0xFFF472B6)
+        PastelThemePreset.MIDNIGHT -> Color(0xFFC084FC) to Color(0xFF1E293B)
     }
 }
 
@@ -475,7 +787,7 @@ fun SettingsSectionHeader(title: String) {
         style = MaterialTheme.typography.titleSmall,
         color = glass.textSecondary,
         fontWeight = FontWeight.Bold,
-        modifier = Modifier.padding(horizontal = 20.dp, vertical = 6.dp)
+        modifier = Modifier.padding(horizontal = 4.dp, vertical = 6.dp)
     )
 }
 
@@ -493,7 +805,7 @@ fun SettingsToggleRow(
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(horizontal = 16.dp, vertical = 12.dp),
+            .padding(horizontal = 14.dp, vertical = 10.dp),
         horizontalArrangement = Arrangement.SpaceBetween,
         verticalAlignment = Alignment.CenterVertically
     ) {
@@ -558,7 +870,7 @@ fun SettingsNavRow(
         modifier = Modifier
             .fillMaxWidth()
             .clickable(onClick = onClick)
-            .padding(horizontal = 16.dp, vertical = 12.dp),
+            .padding(horizontal = 14.dp, vertical = 10.dp),
         horizontalArrangement = Arrangement.SpaceBetween,
         verticalAlignment = Alignment.CenterVertically
     ) {

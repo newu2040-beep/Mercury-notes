@@ -1,8 +1,11 @@
 package com.example.ui.navigation
 
 import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInHorizontally
+import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
@@ -95,6 +98,10 @@ fun MercurynotesApp(
     viewModel: NotesViewModel = viewModel()
 ) {
     val themeMode by viewModel.themeMode.collectAsStateWithLifecycle()
+    val pastelTheme by viewModel.pastelTheme.collectAsStateWithLifecycle()
+    val liquidGlassEnabled by viewModel.liquidGlassEnabled.collectAsStateWithLifecycle()
+    val compactMode by viewModel.compactMode.collectAsStateWithLifecycle()
+    val fontSize by viewModel.fontSize.collectAsStateWithLifecycle()
     val reduceTransparency by viewModel.reduceTransparency.collectAsStateWithLifecycle()
     val isAppLocked by viewModel.isAppLocked.collectAsStateWithLifecycle()
 
@@ -102,6 +109,10 @@ fun MercurynotesApp(
 
     MercurynotesTheme(
         themeMode = themeMode,
+        pastelTheme = pastelTheme,
+        liquidGlassEnabled = liquidGlassEnabled,
+        compactMode = compactMode,
+        fontSize = fontSize,
         reduceTransparency = reduceTransparency
     ) {
         val glass = MercuryTheme.glass
@@ -119,8 +130,18 @@ fun MercurynotesApp(
             ) {
                 AnimatedContent(
                     targetState = currentScreen,
-                    transitionSpec = { fadeIn() togetherWith fadeOut() },
-                    label = "screen_transition"
+                    transitionSpec = {
+                        if (targetState is ScreenDestination.Editor) {
+                            (slideInHorizontally(tween(300)) { it } + fadeIn(tween(300)))
+                                .togetherWith(slideOutHorizontally(tween(300)) { -it / 3 } + fadeOut(tween(300)))
+                        } else if (initialState is ScreenDestination.Editor) {
+                            (slideInHorizontally(tween(300)) { -it / 3 } + fadeIn(tween(300)))
+                                .togetherWith(slideOutHorizontally(tween(300)) { it } + fadeOut(tween(300)))
+                        } else {
+                            fadeIn(tween(250)) togetherWith fadeOut(tween(250))
+                        }
+                    },
+                    label = "fluid_screen_transition"
                 ) { screen ->
                     when (screen) {
                         is ScreenDestination.Main -> {
@@ -205,18 +226,22 @@ fun FrostedBottomNavigation(
     modifier: Modifier = Modifier
 ) {
     val glass = MercuryTheme.glass
+    val isCompact = MercuryTheme.isCompact
 
     Box(
         modifier = modifier
             .fillMaxWidth()
             .windowInsetsPadding(WindowInsets.navigationBars)
-            .padding(horizontal = 24.dp, vertical = 10.dp),
+            .padding(
+                horizontal = if (isCompact) 14.dp else 24.dp,
+                vertical = if (isCompact) 6.dp else 10.dp
+            ),
         contentAlignment = Alignment.Center
     ) {
         Surface(
             modifier = Modifier
                 .fillMaxWidth()
-                .height(64.dp)
+                .height(if (isCompact) 56.dp else 64.dp)
                 .clip(RoundedCornerShape(32.dp))
                 .border(
                     BorderStroke(1.dp, glass.bottomNavBorder),
@@ -229,7 +254,7 @@ fun FrostedBottomNavigation(
             Row(
                 modifier = Modifier
                     .fillMaxSize()
-                    .padding(horizontal = 8.dp),
+                    .padding(horizontal = 6.dp),
                 horizontalArrangement = Arrangement.SpaceAround,
                 verticalAlignment = Alignment.CenterVertically
             ) {
@@ -251,7 +276,10 @@ fun FrostedBottomNavigation(
                                 interactionSource = remember { MutableInteractionSource() },
                                 indication = null
                             ) { onTabSelected(tab) }
-                            .padding(horizontal = 14.dp, vertical = 8.dp),
+                            .padding(
+                                horizontal = if (isCompact) 10.dp else 14.dp,
+                                vertical = if (isCompact) 6.dp else 8.dp
+                            ),
                         contentAlignment = Alignment.Center
                     ) {
                         Row(
@@ -262,7 +290,7 @@ fun FrostedBottomNavigation(
                                 imageVector = if (isSelected) tab.selectedIcon else tab.unselectedIcon,
                                 contentDescription = tab.title,
                                 tint = if (isSelected) MercuryViolet else glass.textSecondary,
-                                modifier = Modifier.size(20.dp)
+                                modifier = Modifier.size(if (isCompact) 18.dp else 20.dp)
                             )
 
                             if (isSelected) {
@@ -270,7 +298,7 @@ fun FrostedBottomNavigation(
                                 Text(
                                     text = tab.title,
                                     color = if (glass.isDark) Color.White else MercuryViolet,
-                                    fontSize = 13.sp,
+                                    fontSize = if (isCompact) 12.sp else 13.sp,
                                     fontWeight = FontWeight.SemiBold
                                 )
                             }

@@ -2,7 +2,6 @@ package com.example.ui.viewmodel
 
 import android.app.Application
 import android.content.Context
-import android.content.Intent
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.data.db.MercuryDatabase
@@ -10,9 +9,11 @@ import com.example.data.model.ChecklistItem
 import com.example.data.model.FolderEntity
 import com.example.data.model.NoteEntity
 import com.example.data.preferences.NoteFontSize
+import com.example.data.preferences.PastelThemePreset
 import com.example.data.preferences.ThemeMode
 import com.example.data.preferences.UserPreferences
 import com.example.data.repository.NoteRepository
+import com.example.util.ImportedNoteData
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
@@ -21,11 +22,8 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.withContext
 import org.json.JSONArray
 import org.json.JSONObject
-import java.text.SimpleDateFormat
-import java.util.Date
 import java.util.Locale
 
 enum class SearchFilterOption {
@@ -55,6 +53,15 @@ class NotesViewModel(application: Application) : AndroidViewModel(application) {
 
     private val _themeMode = MutableStateFlow(userPrefs.themeMode)
     val themeMode: StateFlow<ThemeMode> = _themeMode.asStateFlow()
+
+    private val _pastelTheme = MutableStateFlow(userPrefs.pastelTheme)
+    val pastelTheme: StateFlow<PastelThemePreset> = _pastelTheme.asStateFlow()
+
+    private val _liquidGlassEnabled = MutableStateFlow(userPrefs.liquidGlassEnabled)
+    val liquidGlassEnabled: StateFlow<Boolean> = _liquidGlassEnabled.asStateFlow()
+
+    private val _compactMode = MutableStateFlow(userPrefs.compactMode)
+    val compactMode: StateFlow<Boolean> = _compactMode.asStateFlow()
 
     private val _autoSave = MutableStateFlow(userPrefs.autoSaveEnabled)
     val autoSave: StateFlow<Boolean> = _autoSave.asStateFlow()
@@ -201,6 +208,12 @@ class NotesViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    fun deleteAllNotes() {
+        viewModelScope.launch {
+            repository.deleteAllNotes()
+        }
+    }
+
     fun duplicateNote(note: NoteEntity) {
         viewModelScope.launch {
             val duplicate = note.copy(
@@ -217,6 +230,35 @@ class NotesViewModel(application: Application) : AndroidViewModel(application) {
         viewModelScope.launch {
             val id = repository.saveNote(note)
             onSaved?.invoke(id)
+        }
+    }
+
+    fun importNoteData(imported: ImportedNoteData, onImported: ((Long) -> Unit)? = null) {
+        viewModelScope.launch {
+            val defaultFolder = allFolders.value.firstOrNull { it.isDefault }
+                ?: allFolders.value.firstOrNull()
+            val folderId = defaultFolder?.id ?: 1L
+            val folderName = defaultFolder?.name ?: "Personal"
+            val folderColor = defaultFolder?.color ?: 0xFF8A5CF6
+
+            val checklistJson = if (imported.checklists.isNotEmpty()) {
+                serializeChecklist(imported.checklists)
+            } else null
+
+            val note = NoteEntity(
+                title = imported.title,
+                content = imported.content,
+                folderId = folderId,
+                folderName = folderName,
+                folderColor = folderColor,
+                imageUri = imported.imageUri,
+                checklistJson = checklistJson,
+                tags = if (imported.attachedFileName != null) "attachment" else "",
+                createdAt = System.currentTimeMillis(),
+                updatedAt = System.currentTimeMillis()
+            )
+            val newId = repository.saveNote(note)
+            onImported?.invoke(newId)
         }
     }
 
@@ -262,6 +304,21 @@ class NotesViewModel(application: Application) : AndroidViewModel(application) {
         _themeMode.value = mode
     }
 
+    fun setPastelTheme(preset: PastelThemePreset) {
+        userPrefs.pastelTheme = preset
+        _pastelTheme.value = preset
+    }
+
+    fun setLiquidGlassEnabled(enabled: Boolean) {
+        userPrefs.liquidGlassEnabled = enabled
+        _liquidGlassEnabled.value = enabled
+    }
+
+    fun setCompactMode(enabled: Boolean) {
+        userPrefs.compactMode = enabled
+        _compactMode.value = enabled
+    }
+
     fun setAutoSave(enabled: Boolean) {
         userPrefs.autoSaveEnabled = enabled
         _autoSave.value = enabled
@@ -300,6 +357,10 @@ class NotesViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    fun forceUnlockApp() {
+        _isAppLocked.value = false
+    }
+
     fun lockApp() {
         if (_biometricLockEnabled.value) {
             _isAppLocked.value = true
@@ -309,41 +370,6 @@ class NotesViewModel(application: Application) : AndroidViewModel(application) {
     fun dismissHero() {
         userPrefs.heroDismissed = true
         _heroDismissed.value = true
-    }
-
-    // Export Notes as Text / Markdown
-    fun exportAllNotes(context: Context, formatMarkdown: Boolean = true) {
-        viewModelScope.launch(Dispatchers.IO) {
-            val notes = allActiveNotes.value
-            val sb = StringBuilder()
-            val dateFormat = SimpleDateFormat("yyyy-MM-dd HH:mm", Locale.getDefault())
-
-            sb.append("# Mercurynotes Export - ${dateFormat.format(Date())}\n\n")
-            sb.append("Total Notes: ${notes.size}\n\n---\n\n")
-
-            for (note in notes) {
-                if (formatMarkdown) {
-                    sb.append("## ${note.title.ifBlank { "Untitled Note" }}\n")
-                    sb.append("*Folder: ${note.folderName} | Date: ${dateFormat.format(Date(note.updatedAt))}*\n\n")
-                    sb.append("${note.content}\n\n")
-                } else {
-                    sb.append("TITLE: ${note.title.ifBlank { "Untitled Note" }}\n")
-                    sb.append("FOLDER: ${note.folderName}\n")
-                    sb.append("DATE: ${dateFormat.format(Date(note.updatedAt))}\n\n")
-                    sb.append("${note.content}\n\n")
-                }
-                sb.append("----------------------------------------\n\n")
-            }
-
-            val shareIntent = Intent(Intent.ACTION_SEND).apply {
-                type = "text/plain"
-                putExtra(Intent.EXTRA_SUBJECT, "Mercurynotes Export")
-                putExtra(Intent.EXTRA_TEXT, sb.toString())
-            }
-            val chooser = Intent.createChooser(shareIntent, "Export Mercurynotes")
-            chooser.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-            context.startActivity(chooser)
-        }
     }
 
     fun parseChecklistJson(json: String?): List<ChecklistItem> {

@@ -1,29 +1,37 @@
 package com.example.ui.screens
 
+import android.app.Activity
 import android.content.Context
 import android.content.Intent
 import android.net.Uri
+import android.os.Bundle
+import android.speech.RecognitionListener
+import android.speech.RecognizerIntent
+import android.speech.SpeechRecognizer
+import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
-import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
-import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.ime
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
@@ -33,14 +41,16 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.automirrored.filled.InsertDriveFile
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.AttachFile
 import androidx.compose.material.icons.filled.Bookmark
-import androidx.compose.material.icons.filled.CheckBox
 import androidx.compose.material.icons.filled.Checklist
 import androidx.compose.material.icons.filled.Clear
 import androidx.compose.material.icons.filled.ColorLens
@@ -55,15 +65,22 @@ import androidx.compose.material.icons.filled.FormatUnderlined
 import androidx.compose.material.icons.filled.Image
 import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.LockOpen
+import androidx.compose.material.icons.filled.Mic
+import androidx.compose.material.icons.filled.MicOff
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Palette
+import androidx.compose.material.icons.filled.PictureAsPdf
 import androidx.compose.material.icons.filled.Share
+import androidx.compose.material.icons.filled.TextFields
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.Text
+import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
@@ -75,11 +92,11 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.scale
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.TextStyle
@@ -99,10 +116,14 @@ import com.example.ui.theme.MercuryTheme
 import com.example.ui.theme.MercuryViolet
 import com.example.ui.theme.NoteTintOptions
 import com.example.ui.viewmodel.NotesViewModel
+import com.example.util.ExportFormat
+import com.example.util.FileImporter
+import com.example.util.NotesExporter
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun EditorScreen(
     noteId: Long?,
@@ -112,9 +133,10 @@ fun EditorScreen(
 ) {
     val context = LocalContext.current
     val glass = MercuryTheme.glass
+    val isCompact = MercuryTheme.isCompact
+    val fontScale = MercuryTheme.fontScale
     val folders by viewModel.allFolders.collectAsStateWithLifecycle()
     val autoSaveEnabled by viewModel.autoSave.collectAsStateWithLifecycle()
-    val fontSizePref by viewModel.fontSize.collectAsStateWithLifecycle()
 
     var currentNoteId by remember { mutableStateOf(noteId ?: 0L) }
     var title by remember { mutableStateOf("") }
@@ -127,6 +149,7 @@ fun EditorScreen(
     var isLocked by remember { mutableStateOf(false) }
     var colorTag by remember { mutableStateOf(0L) }
     var imageUri by remember { mutableStateOf<String?>(null) }
+    var attachedDocName by remember { mutableStateOf<String?>(null) }
     var isChecklistMode by remember { mutableStateOf(false) }
     val checklistItems = remember { mutableStateListOf<ChecklistItem>() }
     var newChecklistText by remember { mutableStateOf("") }
@@ -135,13 +158,61 @@ fun EditorScreen(
     var folderDropdownOpen by remember { mutableStateOf(false) }
     var moreMenuOpen by remember { mutableStateOf(false) }
     var colorPickerOpen by remember { mutableStateOf(false) }
+    var showExportSheet by remember { mutableStateOf(false) }
+    var isVoiceListening by remember { mutableStateOf(false) }
 
-    // Photo picker launcher
-    val photoPickerLauncher = rememberLauncherForActivityResult(
-        contract = ActivityResultContracts.PickVisualMedia()
+    // Voice recognition launcher
+    val voiceRecognitionLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.StartActivityForResult()
+    ) { result ->
+        if (result.resultCode == Activity.RESULT_OK && result.data != null) {
+            val spokenText: String? = result.data
+                ?.getStringArrayListExtra(RecognizerIntent.EXTRA_RESULTS)
+                ?.firstOrNull()
+            if (!spokenText.isNullOrBlank()) {
+                val currentText = contentValue.text
+                val separator = if (currentText.isBlank() || currentText.endsWith("\n") || currentText.endsWith(" ")) "" else " "
+                val updatedText = currentText + separator + spokenText
+                contentValue = TextFieldValue(updatedText, TextRange(updatedText.length))
+                Toast.makeText(context, "Voice typed: \"$spokenText\"", Toast.LENGTH_SHORT).show()
+            }
+        }
+        isVoiceListening = false
+    }
+
+    // Photo/Image picker launcher
+    val imagePickerLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.GetContent()
     ) { uri: Uri? ->
         if (uri != null) {
             imageUri = uri.toString()
+            Toast.makeText(context, "Image attached", Toast.LENGTH_SHORT).show()
+        }
+    }
+
+    // Universal File Picker launcher (PDF, TXT, CSV, JSON, ZIP, TTF)
+    val filePickerLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.GetContent()
+    ) { uri: Uri? ->
+        if (uri != null) {
+            val imported = FileImporter.parseImportedUri(context, uri)
+            if (title.isBlank()) {
+                title = imported.title
+            }
+            if (imported.content.isNotBlank()) {
+                val separator = if (contentValue.text.isBlank()) "" else "\n\n"
+                val combined = contentValue.text + separator + imported.content
+                contentValue = TextFieldValue(combined, TextRange(combined.length))
+            }
+            if (imported.checklists.isNotEmpty()) {
+                isChecklistMode = true
+                checklistItems.addAll(imported.checklists)
+            }
+            if (imported.imageUri != null) {
+                imageUri = imported.imageUri
+            }
+            attachedDocName = imported.attachedFileName
+            Toast.makeText(context, "Imported: ${imported.attachedFileName ?: "File"}", Toast.LENGTH_SHORT).show()
         }
     }
 
@@ -171,7 +242,21 @@ fun EditorScreen(
         }
     }
 
-    // Function to save note
+    fun triggerVoiceTyping() {
+        try {
+            isVoiceListening = true
+            val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
+                putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
+                putExtra(RecognizerIntent.EXTRA_LANGUAGE, Locale.getDefault())
+                putExtra(RecognizerIntent.EXTRA_PROMPT, "Speak now to type note...")
+            }
+            voiceRecognitionLauncher.launch(intent)
+        } catch (e: Exception) {
+            isVoiceListening = false
+            Toast.makeText(context, "Voice typing not available on this device", Toast.LENGTH_SHORT).show()
+        }
+    }
+
     fun performSave() {
         if (title.isBlank() && contentValue.text.isBlank() && checklistItems.isEmpty() && imageUri.isNullOrBlank()) {
             return
@@ -193,6 +278,7 @@ fun EditorScreen(
             colorTag = colorTag,
             imageUri = imageUri,
             checklistJson = checklistJson,
+            tags = if (attachedDocName != null) "attachment" else "",
             updatedAt = System.currentTimeMillis()
         )
 
@@ -202,7 +288,6 @@ fun EditorScreen(
         }
     }
 
-    // Auto-save on exit
     DisposableEffect(Unit) {
         onDispose {
             if (autoSaveEnabled) {
@@ -211,10 +296,9 @@ fun EditorScreen(
         }
     }
 
-    // Auto-save debounce effect
     LaunchedEffect(title, contentValue.text, selectedFolder, isFavorite, isPinned, colorTag, imageUri, checklistItems.size) {
         if (autoSaveEnabled && (title.isNotBlank() || contentValue.text.isNotBlank() || checklistItems.isNotEmpty())) {
-            kotlinx.coroutines.delay(1000)
+            kotlinx.coroutines.delay(800)
             performSave()
         }
     }
@@ -229,7 +313,8 @@ fun EditorScreen(
         sdf.format(Date(lastSavedAt))
     }
 
-    val baseFontSize = 16.sp * fontSizePref.scale
+    val baseFontSize = (16 * fontScale).sp
+    val titleFontSize = (26 * fontScale).sp
 
     val canvasTint = if (colorTag != 0L) {
         Color(colorTag).copy(alpha = if (glass.isDark) 0.15f else 0.25f)
@@ -262,11 +347,13 @@ fun EditorScreen(
                     isFavorite = !isFavorite
                     performSave()
                 },
+                onVoiceClick = { triggerVoiceTyping() },
+                onShareClick = { showExportSheet = true },
                 onMoreClick = { moreMenuOpen = true }
             )
 
             // Folder Dropdown Menu
-            Box(modifier = Modifier.padding(start = 60.dp)) {
+            Box(modifier = Modifier.padding(start = if (isCompact) 40.dp else 60.dp)) {
                 DropdownMenu(
                     expanded = folderDropdownOpen,
                     onDismissRequest = { folderDropdownOpen = false },
@@ -283,7 +370,7 @@ fun EditorScreen(
                                             .background(Color(folder.color))
                                     )
                                     Spacer(modifier = Modifier.width(8.dp))
-                                    Text(folder.name)
+                                    Text(folder.name, color = glass.textPrimary)
                                 }
                             },
                             onClick = {
@@ -297,61 +384,73 @@ fun EditorScreen(
             }
 
             // More Options Dropdown Menu
-            Box(modifier = Modifier.align(Alignment.End).padding(end = 20.dp)) {
+            Box(modifier = Modifier.align(Alignment.End).padding(end = 16.dp)) {
                 DropdownMenu(
                     expanded = moreMenuOpen,
                     onDismissRequest = { moreMenuOpen = false },
                     modifier = Modifier.background(glass.cardBackgroundElevated)
                 ) {
                     DropdownMenuItem(
-                        text = { Text("Color Tint") },
+                        text = { Text("Color Tint", color = glass.textPrimary) },
                         onClick = {
                             moreMenuOpen = false
                             colorPickerOpen = !colorPickerOpen
                         },
                         leadingIcon = {
-                            Icon(Icons.Default.Palette, contentDescription = null)
+                            Icon(Icons.Default.Palette, contentDescription = null, tint = MercuryViolet)
                         }
                     )
 
                     DropdownMenuItem(
-                        text = { Text(if (isPinned) "Unpin Note" else "Pin Note") },
+                        text = { Text(if (isPinned) "Unpin Note" else "Pin Note", color = glass.textPrimary) },
                         onClick = {
                             moreMenuOpen = false
                             isPinned = !isPinned
                             performSave()
                         },
                         leadingIcon = {
-                            Icon(Icons.Default.Bookmark, contentDescription = null)
+                            Icon(Icons.Default.Bookmark, contentDescription = null, tint = glass.textSecondary)
                         }
                     )
 
                     DropdownMenuItem(
-                        text = { Text(if (isLocked) "Unlock Note" else "Lock Note") },
+                        text = { Text(if (isLocked) "Unlock Note" else "Lock Note (Biometric)", color = glass.textPrimary) },
                         onClick = {
                             moreMenuOpen = false
                             isLocked = !isLocked
                             performSave()
+                            Toast.makeText(context, if (isLocked) "Note locked" else "Note unlocked", Toast.LENGTH_SHORT).show()
                         },
                         leadingIcon = {
-                            Icon(if (isLocked) Icons.Default.LockOpen else Icons.Default.Lock, contentDescription = null)
+                            Icon(if (isLocked) Icons.Default.LockOpen else Icons.Default.Lock, contentDescription = null, tint = MercuryPink)
                         }
                     )
 
                     DropdownMenuItem(
-                        text = { Text("Share / Export Note") },
+                        text = { Text("Import Document / Font", color = glass.textPrimary) },
                         onClick = {
                             moreMenuOpen = false
-                            shareNote(context, title, contentValue.text)
+                            filePickerLauncher.launch("*/*")
                         },
                         leadingIcon = {
-                            Icon(Icons.Default.Share, contentDescription = null)
+                            Icon(Icons.Default.AttachFile, contentDescription = null, tint = MercuryTheme.glass.secondaryAccent)
+                        }
+                    )
+
+                    DropdownMenuItem(
+                        text = { Text("Export Note (PDF, CSV, TXT, JSON)", color = glass.textPrimary) },
+                        onClick = {
+                            moreMenuOpen = false
+                            showExportSheet = true
+                        },
+                        leadingIcon = {
+                            Icon(Icons.Default.Share, contentDescription = null, tint = MercuryViolet)
                         }
                     )
 
                     if (currentNoteId > 0L) {
                         DropdownMenuItem(
-                            text = { Text("Delete Note", color = Color(0xFFEF4444)) },
+                            text = { Text("Move to Trash", color = Color(0xFFEF4444)) },
                             onClick = {
                                 moreMenuOpen = false
                                 viewModel.moveToTrash(currentNoteId)
@@ -370,7 +469,7 @@ fun EditorScreen(
                 LazyRow(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(horizontal = 20.dp, vertical = 6.dp),
+                        .padding(horizontal = if (isCompact) 12.dp else 20.dp, vertical = 6.dp),
                     horizontalArrangement = Arrangement.spacedBy(10.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
@@ -407,7 +506,7 @@ fun EditorScreen(
                 modifier = Modifier
                     .weight(1f)
                     .fillMaxWidth(),
-                contentPadding = PaddingValues(horizontal = 20.dp, vertical = 8.dp)
+                contentPadding = PaddingValues(horizontal = if (isCompact) 12.dp else 20.dp, vertical = 8.dp)
             ) {
                 // Attached Image (if any)
                 if (!imageUri.isNullOrBlank()) {
@@ -415,9 +514,9 @@ fun EditorScreen(
                         Box(
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .height(220.dp)
-                                .clip(RoundedCornerShape(20.dp))
-                                .border(1.dp, glass.cardBorder, RoundedCornerShape(20.dp))
+                                .height(if (isCompact) 180.dp else 220.dp)
+                                .clip(RoundedCornerShape(18.dp))
+                                .border(1.dp, glass.cardBorder, RoundedCornerShape(18.dp))
                         ) {
                             AsyncImage(
                                 model = imageUri,
@@ -426,7 +525,6 @@ fun EditorScreen(
                                 contentScale = ContentScale.Crop
                             )
 
-                            // Remove Image Button
                             IconButton(
                                 onClick = {
                                     imageUri = null
@@ -448,6 +546,34 @@ fun EditorScreen(
                             }
                         }
                         Spacer(modifier = Modifier.height(14.dp))
+                    }
+                }
+
+                // Attached Document File Tag (if imported)
+                if (attachedDocName != null) {
+                    item {
+                        Row(
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(12.dp))
+                                .background(glass.cardBackgroundElevated)
+                                .border(1.dp, glass.cardBorder, RoundedCornerShape(12.dp))
+                                .padding(horizontal = 12.dp, vertical = 6.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Icon(
+                                imageVector = Icons.AutoMirrored.Filled.InsertDriveFile,
+                                contentDescription = null,
+                                tint = MercuryViolet,
+                                modifier = Modifier.size(16.dp)
+                            )
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text(
+                                text = attachedDocName ?: "File",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = glass.textPrimary
+                            )
+                        }
+                        Spacer(modifier = Modifier.height(10.dp))
                     }
                 }
 
@@ -482,7 +608,7 @@ fun EditorScreen(
                             .testTag("note_title_input"),
                         textStyle = TextStyle(
                             color = glass.textPrimary,
-                            fontSize = 26.sp * fontSizePref.scale,
+                            fontSize = titleFontSize,
                             fontWeight = FontWeight.Bold
                         ),
                         cursorBrush = SolidColor(glass.primaryAccent),
@@ -491,14 +617,14 @@ fun EditorScreen(
                                 Text(
                                     text = "Title",
                                     color = glass.textMuted,
-                                    fontSize = 26.sp * fontSizePref.scale,
+                                    fontSize = titleFontSize,
                                     fontWeight = FontWeight.Bold
                                 )
                             }
                             innerTextField()
                         }
                     )
-                    Spacer(modifier = Modifier.height(16.dp))
+                    Spacer(modifier = Modifier.height(14.dp))
                 }
 
                 // Checklist Items (if in checklist mode)
@@ -526,7 +652,7 @@ fun EditorScreen(
                         Row(
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .padding(vertical = 6.dp),
+                                .padding(vertical = 4.dp),
                             verticalAlignment = Alignment.CenterVertically
                         ) {
                             Icon(
@@ -535,7 +661,7 @@ fun EditorScreen(
                                 tint = MercuryViolet,
                                 modifier = Modifier.size(20.dp)
                             )
-                            Spacer(modifier = Modifier.width(10.dp))
+                            Spacer(modifier = Modifier.width(8.dp))
                             BasicTextField(
                                 value = newChecklistText,
                                 onValueChange = { newChecklistText = it },
@@ -585,18 +711,18 @@ fun EditorScreen(
                         onValueChange = { contentValue = it },
                         modifier = Modifier
                             .fillMaxWidth()
-                            .height(if (contentValue.text.length < 200) 300.dp else 600.dp)
+                            .height(if (contentValue.text.length < 200) 280.dp else 600.dp)
                             .testTag("note_content_input"),
                         textStyle = TextStyle(
                             color = glass.textPrimary,
                             fontSize = baseFontSize,
-                            lineHeight = (baseFontSize.value * 1.5f).sp
+                            lineHeight = (baseFontSize.value * 1.55f).sp
                         ),
                         cursorBrush = SolidColor(glass.primaryAccent),
                         decorationBox = { innerTextField ->
                             if (contentValue.text.isEmpty() && checklistItems.isEmpty()) {
                                 Text(
-                                    text = "Start writing your thoughts, ideas, or lists here...",
+                                    text = "Start writing your notes, thoughts, or voice dictations here...",
                                     color = glass.textMuted,
                                     fontSize = baseFontSize
                                 )
@@ -607,13 +733,14 @@ fun EditorScreen(
                 }
             }
 
-            // Floating Frosted Formatting Toolbar
+            // Floating Frosted Formatting Toolbar (Fully responsive with Voice typing, File Import, Lists, Formatting)
             FloatingFormattingToolbar(
+                isListening = isVoiceListening,
                 onBold = {
                     val text = contentValue.text
                     val sel = contentValue.selection
                     val newText = if (sel.collapsed) {
-                        text.substring(0, sel.start) + "****" + text.substring(sel.end)
+                        text.substring(0, sel.start) + "**Bold**" + text.substring(sel.end)
                     } else {
                         text.substring(0, sel.start) + "**" + text.substring(sel.start, sel.end) + "**" + text.substring(sel.end)
                     }
@@ -623,7 +750,7 @@ fun EditorScreen(
                     val text = contentValue.text
                     val sel = contentValue.selection
                     val newText = if (sel.collapsed) {
-                        text.substring(0, sel.start) + "**" + text.substring(sel.end)
+                        text.substring(0, sel.start) + "*Italic*" + text.substring(sel.end)
                     } else {
                         text.substring(0, sel.start) + "*" + text.substring(sel.start, sel.end) + "*" + text.substring(sel.end)
                     }
@@ -632,7 +759,11 @@ fun EditorScreen(
                 onUnderline = {
                     val text = contentValue.text
                     val sel = contentValue.selection
-                    val newText = text.substring(0, sel.start) + "<u>" + text.substring(sel.start, sel.end) + "</u>" + text.substring(sel.end)
+                    val newText = if (sel.collapsed) {
+                        text.substring(0, sel.start) + "<u>Underline</u>" + text.substring(sel.end)
+                    } else {
+                        text.substring(0, sel.start) + "<u>" + text.substring(sel.start, sel.end) + "</u>" + text.substring(sel.end)
+                    }
                     contentValue = TextFieldValue(newText, TextRange(sel.start + 3))
                 },
                 onBulletList = {
@@ -656,18 +787,173 @@ fun EditorScreen(
                 onToggleChecklist = {
                     isChecklistMode = !isChecklistMode
                     if (isChecklistMode && checklistItems.isEmpty()) {
-                        checklistItems.add(ChecklistItem(text = "Task 1"))
+                        checklistItems.add(ChecklistItem(text = "First task"))
                     }
                 },
                 onAttachImage = {
-                    photoPickerLauncher.launch(
-                        PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)
-                    )
+                    imagePickerLauncher.launch("image/*")
+                },
+                onAttachFile = {
+                    filePickerLauncher.launch("*/*")
+                },
+                onVoiceTyping = {
+                    triggerVoiceTyping()
                 },
                 onToggleColorPicker = {
                     colorPickerOpen = !colorPickerOpen
                 }
             )
+        }
+
+        // Export Modal Bottom Sheet
+        if (showExportSheet) {
+            ModalBottomSheet(
+                onDismissRequest = { showExportSheet = false },
+                containerColor = glass.cardBackgroundElevated
+            ) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 24.dp, vertical = 16.dp)
+                ) {
+                    Text(
+                        text = "Export & Share Note",
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.Bold,
+                        color = glass.textPrimary
+                    )
+                    Spacer(modifier = Modifier.height(4.dp))
+                    Text(
+                        text = "Choose your preferred document or data format:",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = glass.textSecondary
+                    )
+                    Spacer(modifier = Modifier.height(16.dp))
+
+                    val exportNoteEntity = NoteEntity(
+                        id = currentNoteId,
+                        title = title,
+                        content = contentValue.text,
+                        folderId = selectedFolder.id,
+                        folderName = selectedFolder.name,
+                        folderColor = selectedFolder.color,
+                        isPinned = isPinned,
+                        isFavorite = isFavorite,
+                        isLocked = isLocked,
+                        colorTag = colorTag,
+                        imageUri = imageUri,
+                        updatedAt = lastSavedAt
+                    )
+
+                    ExportOptionCard(
+                        title = "PDF Document",
+                        subtitle = "High quality formatted printable PDF (.pdf)",
+                        icon = Icons.Default.PictureAsPdf,
+                        iconTint = Color(0xFFEF4444)
+                    ) {
+                        showExportSheet = false
+                        NotesExporter.exportAndShare(context, exportNoteEntity, ExportFormat.PDF, checklistItems)
+                    }
+
+                    ExportOptionCard(
+                        title = "Plain Text",
+                        subtitle = "Universal clean text file (.txt)",
+                        icon = Icons.Default.TextFields,
+                        iconTint = MercuryViolet
+                    ) {
+                        showExportSheet = false
+                        NotesExporter.exportAndShare(context, exportNoteEntity, ExportFormat.TXT, checklistItems)
+                    }
+
+                    ExportOptionCard(
+                        title = "Markdown Document",
+                        subtitle = "Formatted with headers & checklists (.md)",
+                        icon = Icons.AutoMirrored.Filled.InsertDriveFile,
+                        iconTint = MercuryTheme.glass.secondaryAccent
+                    ) {
+                        showExportSheet = false
+                        NotesExporter.exportAndShare(context, exportNoteEntity, ExportFormat.MARKDOWN, checklistItems)
+                    }
+
+                    ExportOptionCard(
+                        title = "Spreadsheet / CSV",
+                        subtitle = "Tabular data structure (.csv)",
+                        icon = Icons.Default.Checklist,
+                        iconTint = Color(0xFF10B981)
+                    ) {
+                        showExportSheet = false
+                        NotesExporter.exportAndShare(context, exportNoteEntity, ExportFormat.CSV, checklistItems)
+                    }
+
+                    ExportOptionCard(
+                        title = "Structured JSON",
+                        subtitle = "Developer format with full schema (.json)",
+                        icon = Icons.Default.Share,
+                        iconTint = Color(0xFFF59E0B)
+                    ) {
+                        showExportSheet = false
+                        NotesExporter.exportAndShare(context, exportNoteEntity, ExportFormat.JSON, checklistItems)
+                    }
+
+                    Spacer(modifier = Modifier.height(24.dp))
+                }
+            }
+        }
+    }
+}
+
+@Composable
+fun ExportOptionCard(
+    title: String,
+    subtitle: String,
+    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    iconTint: Color,
+    onClick: () -> Unit
+) {
+    val glass = MercuryTheme.glass
+
+    GlassCard(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(vertical = 5.dp),
+        shape = RoundedCornerShape(14.dp),
+        backgroundColor = glass.searchBarBackground,
+        onClick = onClick
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(14.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Box(
+                modifier = Modifier
+                    .size(38.dp)
+                    .clip(CircleShape)
+                    .background(iconTint.copy(alpha = 0.15f)),
+                contentAlignment = Alignment.Center
+            ) {
+                Icon(
+                    imageVector = icon,
+                    contentDescription = null,
+                    tint = iconTint,
+                    modifier = Modifier.size(20.dp)
+                )
+            }
+            Spacer(modifier = Modifier.width(14.dp))
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = title,
+                    style = MaterialTheme.typography.titleSmall,
+                    fontWeight = FontWeight.SemiBold,
+                    color = glass.textPrimary
+                )
+                Text(
+                    text = subtitle,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = glass.textMuted
+                )
+            }
         }
     }
 }
@@ -679,14 +965,17 @@ fun EditorTopBar(
     onFolderClick: () -> Unit,
     isFavorite: Boolean,
     onToggleFavorite: () -> Unit,
+    onVoiceClick: () -> Unit,
+    onShareClick: () -> Unit,
     onMoreClick: () -> Unit
 ) {
     val glass = MercuryTheme.glass
+    val isCompact = MercuryTheme.isCompact
 
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(horizontal = 16.dp, vertical = 8.dp),
+            .padding(horizontal = if (isCompact) 10.dp else 16.dp, vertical = 6.dp),
         horizontalArrangement = Arrangement.SpaceBetween,
         verticalAlignment = Alignment.CenterVertically
     ) {
@@ -695,7 +984,7 @@ fun EditorTopBar(
         ) {
             // Back Button
             GlassCard(
-                modifier = Modifier.size(38.dp),
+                modifier = Modifier.size(36.dp),
                 shape = CircleShape,
                 backgroundColor = glass.searchBarBackground,
                 onClick = onBack
@@ -705,12 +994,12 @@ fun EditorTopBar(
                     contentDescription = "Back",
                     tint = glass.textPrimary,
                     modifier = Modifier
-                        .size(20.dp)
+                        .size(18.dp)
                         .align(Alignment.Center)
                 )
             }
 
-            Spacer(modifier = Modifier.width(12.dp))
+            Spacer(modifier = Modifier.width(8.dp))
 
             // Folder Pill Tag
             Row(
@@ -719,19 +1008,19 @@ fun EditorTopBar(
                     .background(Color(selectedFolder.color).copy(alpha = 0.15f))
                     .border(1.dp, Color(selectedFolder.color).copy(alpha = 0.3f), RoundedCornerShape(16.dp))
                     .clickable(onClick = onFolderClick)
-                    .padding(horizontal = 12.dp, vertical = 6.dp),
+                    .padding(horizontal = 10.dp, vertical = 5.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Box(
                     modifier = Modifier
-                        .size(8.dp)
+                        .size(7.dp)
                         .clip(CircleShape)
                         .background(Color(selectedFolder.color))
                 )
                 Spacer(modifier = Modifier.width(6.dp))
                 Text(
                     text = selectedFolder.name,
-                    fontSize = 13.sp,
+                    fontSize = 12.sp,
                     fontWeight = FontWeight.SemiBold,
                     color = Color(selectedFolder.color)
                 )
@@ -740,11 +1029,45 @@ fun EditorTopBar(
 
         Row(
             verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(8.dp)
+            horizontalArrangement = Arrangement.spacedBy(6.dp)
         ) {
+            // Voice Typing Fast Action Button
+            GlassCard(
+                modifier = Modifier.size(36.dp),
+                shape = CircleShape,
+                backgroundColor = glass.searchBarBackground,
+                onClick = onVoiceClick
+            ) {
+                Icon(
+                    imageVector = Icons.Default.Mic,
+                    contentDescription = "Voice Dictate",
+                    tint = MercuryViolet,
+                    modifier = Modifier
+                        .size(18.dp)
+                        .align(Alignment.Center)
+                )
+            }
+
+            // Share / Export Button
+            GlassCard(
+                modifier = Modifier.size(36.dp),
+                shape = CircleShape,
+                backgroundColor = glass.searchBarBackground,
+                onClick = onShareClick
+            ) {
+                Icon(
+                    imageVector = Icons.Default.Share,
+                    contentDescription = "Share",
+                    tint = glass.textPrimary,
+                    modifier = Modifier
+                        .size(18.dp)
+                        .align(Alignment.Center)
+                )
+            }
+
             // Favorite Button
             GlassCard(
-                modifier = Modifier.size(38.dp),
+                modifier = Modifier.size(36.dp),
                 shape = CircleShape,
                 backgroundColor = glass.searchBarBackground,
                 onClick = onToggleFavorite
@@ -754,14 +1077,14 @@ fun EditorTopBar(
                     contentDescription = "Favorite",
                     tint = if (isFavorite) MercuryPink else glass.textSecondary,
                     modifier = Modifier
-                        .size(18.dp)
+                        .size(17.dp)
                         .align(Alignment.Center)
                 )
             }
 
             // More Options
             GlassCard(
-                modifier = Modifier.size(38.dp),
+                modifier = Modifier.size(36.dp),
                 shape = CircleShape,
                 backgroundColor = glass.searchBarBackground,
                 onClick = onMoreClick
@@ -771,7 +1094,7 @@ fun EditorTopBar(
                     contentDescription = "More",
                     tint = glass.textPrimary,
                     modifier = Modifier
-                        .size(18.dp)
+                        .size(17.dp)
                         .align(Alignment.Center)
                 )
             }
@@ -781,6 +1104,7 @@ fun EditorTopBar(
 
 @Composable
 fun FloatingFormattingToolbar(
+    isListening: Boolean,
     onBold: () -> Unit,
     onItalic: () -> Unit,
     onUnderline: () -> Unit,
@@ -788,27 +1112,59 @@ fun FloatingFormattingToolbar(
     onNumberedList: () -> Unit,
     onToggleChecklist: () -> Unit,
     onAttachImage: () -> Unit,
+    onAttachFile: () -> Unit,
+    onVoiceTyping: () -> Unit,
     onToggleColorPicker: () -> Unit
 ) {
     val glass = MercuryTheme.glass
+    val isCompact = MercuryTheme.isCompact
+
+    val infiniteTransition = rememberInfiniteTransition(label = "mic_pulse")
+    val micScale by infiniteTransition.animateFloat(
+        initialValue = 1f,
+        targetValue = if (isListening) 1.25f else 1f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(600),
+            repeatMode = RepeatMode.Reverse
+        ),
+        label = "mic_scale"
+    )
 
     GlassCard(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(horizontal = 16.dp, vertical = 8.dp)
+            .padding(horizontal = if (isCompact) 8.dp else 14.dp, vertical = 6.dp)
             .height(52.dp),
         shape = RoundedCornerShape(26.dp),
         backgroundColor = glass.bottomNavBackground,
-        borderColor = glass.bottomNavBorder,
-        borderWidth = 1.dp
+        borderColor = if (isListening) MercuryPink else glass.bottomNavBorder,
+        borderWidth = if (isListening) 2.dp else 1.dp
     ) {
         Row(
             modifier = Modifier
                 .fillMaxSize()
-                .padding(horizontal = 8.dp),
-            horizontalArrangement = Arrangement.SpaceAround,
+                .horizontalScroll(rememberScrollState())
+                .padding(horizontal = 6.dp),
+            horizontalArrangement = Arrangement.spacedBy(4.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
+            // Voice Mic Dictation Button
+            IconButton(
+                onClick = onVoiceTyping,
+                modifier = Modifier
+                    .size(36.dp)
+                    .scale(micScale)
+                    .clip(CircleShape)
+                    .background(if (isListening) MercuryPink.copy(alpha = 0.25f) else Color.Transparent)
+            ) {
+                Icon(
+                    imageVector = if (isListening) Icons.Default.MicOff else Icons.Default.Mic,
+                    contentDescription = "Voice Dictate",
+                    tint = if (isListening) MercuryPink else MercuryViolet,
+                    modifier = Modifier.size(20.dp)
+                )
+            }
+
             IconButton(onClick = onBold, modifier = Modifier.size(36.dp)) {
                 Icon(Icons.Default.FormatBold, contentDescription = "Bold", tint = glass.textPrimary, modifier = Modifier.size(19.dp))
             }
@@ -830,20 +1186,12 @@ fun FloatingFormattingToolbar(
             IconButton(onClick = onAttachImage, modifier = Modifier.size(36.dp)) {
                 Icon(Icons.Default.Image, contentDescription = "Attach image", tint = glass.textPrimary, modifier = Modifier.size(19.dp))
             }
+            IconButton(onClick = onAttachFile, modifier = Modifier.size(36.dp)) {
+                Icon(Icons.Default.AttachFile, contentDescription = "Attach File/Doc/Font", tint = MercuryTheme.glass.secondaryAccent, modifier = Modifier.size(19.dp))
+            }
             IconButton(onClick = onToggleColorPicker, modifier = Modifier.size(36.dp)) {
                 Icon(Icons.Default.ColorLens, contentDescription = "Color tint", tint = MercuryPink, modifier = Modifier.size(19.dp))
             }
         }
     }
-}
-
-fun shareNote(context: Context, title: String, content: String) {
-    val shareIntent = Intent(Intent.ACTION_SEND).apply {
-        type = "text/plain"
-        putExtra(Intent.EXTRA_SUBJECT, title.ifBlank { "Mercurynotes Note" })
-        putExtra(Intent.EXTRA_TEXT, "${title.ifBlank { "Untitled" }}\n\n$content\n\n— Captured with Mercurynotes")
-    }
-    val chooser = Intent.createChooser(shareIntent, "Share Note")
-    chooser.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-    context.startActivity(chooser)
 }

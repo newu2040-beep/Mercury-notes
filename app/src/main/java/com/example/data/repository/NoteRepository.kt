@@ -44,6 +44,9 @@ class NoteRepository(
     suspend fun emptyTrash() =
         noteDao.emptyTrash()
 
+    suspend fun deleteAllNotes() =
+        noteDao.deleteAllNotes()
+
     suspend fun saveFolder(folder: FolderEntity): Long =
         folderDao.insertFolder(folder)
 

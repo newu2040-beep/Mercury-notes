@@ -6,75 +6,87 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.sp
 
-val Typography = Typography(
-    displayLarge = TextStyle(
-        fontFamily = FontFamily.SansSerif,
-        fontWeight = FontWeight.Bold,
-        fontSize = 34.sp,
-        lineHeight = 40.sp,
-        letterSpacing = (-0.5).sp
-    ),
-    displayMedium = TextStyle(
-        fontFamily = FontFamily.SansSerif,
-        fontWeight = FontWeight.Bold,
-        fontSize = 28.sp,
-        lineHeight = 34.sp,
-        letterSpacing = (-0.3).sp
-    ),
-    titleLarge = TextStyle(
-        fontFamily = FontFamily.SansSerif,
-        fontWeight = FontWeight.SemiBold,
-        fontSize = 22.sp,
-        lineHeight = 28.sp,
-        letterSpacing = (-0.2).sp
-    ),
-    titleMedium = TextStyle(
-        fontFamily = FontFamily.SansSerif,
-        fontWeight = FontWeight.SemiBold,
-        fontSize = 18.sp,
-        lineHeight = 24.sp,
-        letterSpacing = (-0.1).sp
-    ),
-    titleSmall = TextStyle(
-        fontFamily = FontFamily.SansSerif,
-        fontWeight = FontWeight.SemiBold,
-        fontSize = 15.sp,
-        lineHeight = 20.sp,
-        letterSpacing = 0.sp
-    ),
-    bodyLarge = TextStyle(
-        fontFamily = FontFamily.SansSerif,
-        fontWeight = FontWeight.Normal,
-        fontSize = 16.sp,
-        lineHeight = 24.sp,
-        letterSpacing = 0.2.sp
-    ),
-    bodyMedium = TextStyle(
-        fontFamily = FontFamily.SansSerif,
-        fontWeight = FontWeight.Normal,
-        fontSize = 14.sp,
-        lineHeight = 20.sp,
-        letterSpacing = 0.25.sp
-    ),
-    labelLarge = TextStyle(
-        fontFamily = FontFamily.SansSerif,
-        fontWeight = FontWeight.Medium,
-        fontSize = 14.sp,
-        lineHeight = 20.sp,
-        letterSpacing = 0.1.sp
-    ),
-    labelMedium = TextStyle(
-        fontFamily = FontFamily.SansSerif,
-        fontWeight = FontWeight.Medium,
-        fontSize = 12.sp,
-        lineHeight = 16.sp,
-        letterSpacing = 0.4.sp
-    ),
-    labelSmall = TextStyle(
-        fontFamily = FontFamily.SansSerif,
-        fontWeight = FontWeight.SemiBold,
-        fontSize = 11.sp,
-        lineHeight = 14.sp,
-        letterSpacing = 0.5.sp
+fun createScaledTypography(scale: Float = 1.0f, customFontFamily: FontFamily = FontFamily.SansSerif): Typography {
+    val s = scale.coerceIn(0.75f, 1.6f)
+    return Typography(
+        displayLarge = TextStyle(
+            fontFamily = customFontFamily,
+            fontWeight = FontWeight.Bold,
+            fontSize = (34 * s).sp,
+            lineHeight = (40 * s).sp,
+            letterSpacing = (-0.5).sp
+        ),
+        displayMedium = TextStyle(
+            fontFamily = customFontFamily,
+            fontWeight = FontWeight.Bold,
+            fontSize = (28 * s).sp,
+            lineHeight = (34 * s).sp,
+            letterSpacing = (-0.3).sp
+        ),
+        titleLarge = TextStyle(
+            fontFamily = customFontFamily,
+            fontWeight = FontWeight.SemiBold,
+            fontSize = (22 * s).sp,
+            lineHeight = (28 * s).sp,
+            letterSpacing = (-0.2).sp
+        ),
+        titleMedium = TextStyle(
+            fontFamily = customFontFamily,
+            fontWeight = FontWeight.SemiBold,
+            fontSize = (18 * s).sp,
+            lineHeight = (24 * s).sp,
+            letterSpacing = (-0.1).sp
+        ),
+        titleSmall = TextStyle(
+            fontFamily = customFontFamily,
+            fontWeight = FontWeight.SemiBold,
+            fontSize = (15 * s).sp,
+            lineHeight = (20 * s).sp,
+            letterSpacing = 0.sp
+        ),
+        bodyLarge = TextStyle(
+            fontFamily = customFontFamily,
+            fontWeight = FontWeight.Normal,
+            fontSize = (16 * s).sp,
+            lineHeight = (24 * s).sp,
+            letterSpacing = 0.2.sp
+        ),
+        bodyMedium = TextStyle(
+            fontFamily = customFontFamily,
+            fontWeight = FontWeight.Normal,
+            fontSize = (14 * s).sp,
+            lineHeight = (20 * s).sp,
+            letterSpacing = 0.25.sp
+        ),
+        bodySmall = TextStyle(
+            fontFamily = customFontFamily,
+            fontWeight = FontWeight.Normal,
+            fontSize = (12 * s).sp,
+            lineHeight = (16 * s).sp,
+            letterSpacing = 0.3.sp
+        ),
+        labelLarge = TextStyle(
+            fontFamily = customFontFamily,
+            fontWeight = FontWeight.Medium,
+            fontSize = (14 * s).sp,
+            lineHeight = (20 * s).sp,
+            letterSpacing = 0.1.sp
+        ),
+        labelMedium = TextStyle(
+            fontFamily = customFontFamily,
+            fontWeight = FontWeight.Medium,
+            fontSize = (12 * s).sp,
+            lineHeight = (16 * s).sp,
+            letterSpacing = 0.4.sp
+        ),
+        labelSmall = TextStyle(
+            fontFamily = customFontFamily,
+            fontWeight = FontWeight.SemiBold,
+            fontSize = (11 * s).sp,
+            lineHeight = (14 * s).sp,
+            letterSpacing = 0.5.sp
+        )
     )
-)
+}
+
+val Typography = createScaledTypography(1.0f)

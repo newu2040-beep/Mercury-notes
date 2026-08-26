@@ -25,6 +25,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -34,13 +35,17 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.fragment.app.FragmentActivity
 import com.example.R
+import com.example.ui.theme.MercuryPink
 import com.example.ui.theme.MercuryTheme
 import com.example.ui.theme.MercuryViolet
+import com.example.util.BiometricAuthHelper
 
 @Composable
 fun LockScreen(
@@ -48,9 +53,32 @@ fun LockScreen(
     onVerifyPin: (String) -> Boolean,
     modifier: Modifier = Modifier
 ) {
+    val context = LocalContext.current
     val glass = MercuryTheme.glass
     var enteredPin by remember { mutableStateOf("") }
     var isError by remember { mutableStateOf(false) }
+
+    fun tryNativeBiometric() {
+        val activity = context as? FragmentActivity
+        if (activity != null && BiometricAuthHelper.isBiometricAvailable(context)) {
+            BiometricAuthHelper.promptBiometricUnlock(
+                activity = activity,
+                title = "Unlock Mercurynotes",
+                subtitle = "Use Face Recognition, Fingerprint or Device PIN",
+                onSuccess = {
+                    onUnlockSuccess()
+                },
+                onError = { err ->
+                    // User canceled or failed; fallback to manual PIN
+                }
+            )
+        }
+    }
+
+    // Auto-prompt hardware biometrics on screen load
+    LaunchedEffect(Unit) {
+        tryNativeBiometric()
+    }
 
     Box(
         modifier = modifier
@@ -68,15 +96,15 @@ fun LockScreen(
                 painter = painterResource(id = R.drawable.mercurynotes_icon),
                 contentDescription = "Mercurynotes",
                 modifier = Modifier
-                    .size(72.dp)
+                    .size(68.dp)
                     .clip(RoundedCornerShape(20.dp)),
                 contentScale = ContentScale.Crop
             )
 
-            Spacer(modifier = Modifier.height(20.dp))
+            Spacer(modifier = Modifier.height(16.dp))
 
             Text(
-                text = "Mercurynotes Locked",
+                text = "Mercurynotes",
                 style = MaterialTheme.typography.titleLarge,
                 color = glass.textPrimary,
                 fontWeight = FontWeight.Bold
@@ -85,12 +113,12 @@ fun LockScreen(
             Spacer(modifier = Modifier.height(6.dp))
 
             Text(
-                text = if (isError) "Incorrect PIN, please try again" else "Enter your PIN code to unlock",
+                text = if (isError) "Incorrect PIN, please try again" else "Unlock with Face ID, Fingerprint, or PIN",
                 style = MaterialTheme.typography.bodyMedium,
                 color = if (isError) Color(0xFFEF4444) else glass.textSecondary
             )
 
-            Spacer(modifier = Modifier.height(28.dp))
+            Spacer(modifier = Modifier.height(24.dp))
 
             // PIN Dots
             Row(
@@ -110,7 +138,7 @@ fun LockScreen(
                 }
             }
 
-            Spacer(modifier = Modifier.height(36.dp))
+            Spacer(modifier = Modifier.height(32.dp))
 
             // Numeric Keypad
             val buttons = listOf(
@@ -141,10 +169,7 @@ fun LockScreen(
                                             }
                                         }
                                         "BIO" -> {
-                                            // Biometric quick auth
-                                            if (onVerifyPin("1234") || onVerifyPin(enteredPin)) {
-                                                onUnlockSuccess()
-                                            }
+                                            tryNativeBiometric()
                                         }
                                         else -> {
                                             if (enteredPin.length < 4) {
@@ -202,7 +227,7 @@ fun KeypadButton(
                         imageVector = Icons.Default.Fingerprint,
                         contentDescription = "Biometrics",
                         tint = MercuryViolet,
-                        modifier = Modifier.size(26.dp)
+                        modifier = Modifier.size(28.dp)
                     )
                 }
                 else -> {

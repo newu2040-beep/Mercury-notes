@@ -54,6 +54,9 @@ interface NoteDao {
     @Query("DELETE FROM notes WHERE isDeleted = 1")
     suspend fun emptyTrash()
 
+    @Query("DELETE FROM notes")
+    suspend fun deleteAllNotes()
+
     @Query("SELECT COUNT(*) FROM notes WHERE isDeleted = 0")
     fun getActiveNotesCount(): Flow<Int>
 

@@ -1,8 +1,10 @@
 package com.example.ui.screens
 
+import android.net.Uri
+import android.widget.Toast
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedVisibility
-import androidx.compose.animation.fadeIn
-import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -25,6 +27,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.AttachFile
 import androidx.compose.material.icons.filled.Bookmark
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.DarkMode
@@ -34,6 +37,7 @@ import androidx.compose.material.icons.filled.Favorite
 import androidx.compose.material.icons.filled.FavoriteBorder
 import androidx.compose.material.icons.filled.Image
 import androidx.compose.material.icons.filled.LightMode
+import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.PushPin
 import androidx.compose.material.icons.filled.Search
@@ -55,6 +59,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
@@ -75,6 +80,7 @@ import com.example.ui.theme.MercuryPrimaryGradient
 import com.example.ui.theme.MercuryTheme
 import com.example.ui.theme.MercuryViolet
 import com.example.ui.viewmodel.NotesViewModel
+import com.example.util.FileImporter
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -87,7 +93,11 @@ fun HomeScreen(
     onSearchClick: () -> Unit,
     modifier: Modifier = Modifier
 ) {
+    val context = LocalContext.current
     val glass = MercuryTheme.glass
+    val isCompact = MercuryTheme.isCompact
+    val fontScale = MercuryTheme.fontScale
+
     val notes by viewModel.homeDisplayNotes.collectAsStateWithLifecycle()
     val folders by viewModel.allFolders.collectAsStateWithLifecycle()
     val selectedFolderId by viewModel.selectedFolderId.collectAsStateWithLifecycle()
@@ -97,6 +107,19 @@ fun HomeScreen(
     val pinnedNotes = remember(notes) { notes.filter { it.isPinned } }
     val regularNotes = remember(notes) { notes.filter { !it.isPinned } }
 
+    // Universal File Picker (PDF, TXT, CSV, JSON, ZIP, Fonts, Images)
+    val filePickerLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.GetContent()
+    ) { uri: Uri? ->
+        if (uri != null) {
+            val imported = FileImporter.parseImportedUri(context, uri)
+            viewModel.importNoteData(imported) { newId ->
+                Toast.makeText(context, "Imported \"${imported.title}\"", Toast.LENGTH_SHORT).show()
+                onNoteClick(newId)
+            }
+        }
+    }
+
     Box(
         modifier = modifier
             .fillMaxSize()
@@ -104,9 +127,14 @@ fun HomeScreen(
     ) {
         LazyColumn(
             modifier = Modifier.fillMaxSize(),
-            contentPadding = PaddingValues(bottom = 100.dp)
+            contentPadding = PaddingValues(
+                start = if (isCompact) 10.dp else 16.dp,
+                end = if (isCompact) 10.dp else 16.dp,
+                top = if (isCompact) 8.dp else 16.dp,
+                bottom = 110.dp
+            )
         ) {
-            // Header: Logo, Title, Search button, Theme toggle
+            // Header: Logo, Title, Quick Actions (Import, Search, Theme toggle)
             item {
                 HomeHeader(
                     themeMode = themeMode,
@@ -118,11 +146,12 @@ fun HomeScreen(
                         }
                         viewModel.setThemeMode(nextTheme)
                     },
-                    onSearchClick = onSearchClick
+                    onSearchClick = onSearchClick,
+                    onImportClick = { filePickerLauncher.launch("*/*") }
                 )
             }
 
-            // Hero Card ("Good Ideas Live Here" or "Welcome Back")
+            // Hero Card ("Good Ideas Live Here")
             if (!heroDismissed) {
                 item {
                     HomeHeroCard(
@@ -140,14 +169,14 @@ fun HomeScreen(
                     selectedFolderId = selectedFolderId,
                     onSelectFolder = { viewModel.setSelectedFolder(it) }
                 )
-                Spacer(modifier = Modifier.height(16.dp))
+                Spacer(modifier = Modifier.height(12.dp))
             }
 
             // Section: Pinned Notes (if any)
             if (pinnedNotes.isNotEmpty()) {
                 item {
                     SectionHeader(
-                        title = "Pinned",
+                        title = "Pinned Notes",
                         icon = Icons.Default.PushPin,
                         count = pinnedNotes.size
                     )
@@ -165,7 +194,7 @@ fun HomeScreen(
                 }
 
                 item {
-                    Spacer(modifier = Modifier.height(16.dp))
+                    Spacer(modifier = Modifier.height(14.dp))
                 }
             }
 
@@ -183,7 +212,8 @@ fun HomeScreen(
                 item {
                     EmptyNotesState(
                         isFiltered = selectedFolderId != null,
-                        onCreateNote = onNewNoteClick
+                        onCreateNote = onNewNoteClick,
+                        onImportFile = { filePickerLauncher.launch("*/*") }
                     )
                 }
             } else {
@@ -207,7 +237,7 @@ fun HomeScreen(
             onClick = onNewNoteClick,
             modifier = Modifier
                 .align(Alignment.BottomEnd)
-                .padding(end = 20.dp, bottom = 28.dp)
+                .padding(end = if (isCompact) 14.dp else 20.dp, bottom = 24.dp)
         )
     }
 }
@@ -216,14 +246,16 @@ fun HomeScreen(
 fun HomeHeader(
     themeMode: ThemeMode,
     onToggleTheme: () -> Unit,
-    onSearchClick: () -> Unit
+    onSearchClick: () -> Unit,
+    onImportClick: () -> Unit
 ) {
     val glass = MercuryTheme.glass
+    val isCompact = MercuryTheme.isCompact
 
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(start = 20.dp, end = 20.dp, top = 20.dp, bottom = 12.dp),
+            .padding(horizontal = 4.dp, vertical = 8.dp),
         horizontalArrangement = Arrangement.SpaceBetween,
         verticalAlignment = Alignment.CenterVertically
     ) {
@@ -235,35 +267,54 @@ fun HomeHeader(
                 painter = painterResource(id = R.drawable.mercurynotes_icon),
                 contentDescription = "Mercurynotes Logo",
                 modifier = Modifier
-                    .size(40.dp)
+                    .size(if (isCompact) 36.dp else 42.dp)
                     .clip(RoundedCornerShape(12.dp)),
                 contentScale = ContentScale.Crop
             )
 
-            Spacer(modifier = Modifier.width(12.dp))
+            Spacer(modifier = Modifier.width(10.dp))
 
             Column {
                 Text(
                     text = "Mercurynotes",
                     style = MaterialTheme.typography.titleLarge,
                     color = glass.textPrimary,
-                    fontWeight = FontWeight.Bold
+                    fontWeight = FontWeight.Bold,
+                    fontSize = if (isCompact) 18.sp else 22.sp
                 )
                 Text(
-                    text = "Capture Ideas • Organize Life",
+                    text = "Think. Write. Organize.",
                     style = MaterialTheme.typography.labelSmall,
-                    color = glass.textSecondary
+                    color = glass.textSecondary,
+                    fontSize = if (isCompact) 10.sp else 12.sp
                 )
             }
         }
 
         Row(
             verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(8.dp)
+            horizontalArrangement = Arrangement.spacedBy(6.dp)
         ) {
+            // Universal Import Button
+            GlassCard(
+                modifier = Modifier.size(if (isCompact) 36.dp else 40.dp),
+                shape = CircleShape,
+                backgroundColor = glass.searchBarBackground,
+                onClick = onImportClick
+            ) {
+                Icon(
+                    imageVector = Icons.Default.AttachFile,
+                    contentDescription = "Import Document / Font",
+                    tint = MercuryTheme.glass.secondaryAccent,
+                    modifier = Modifier
+                        .size(if (isCompact) 18.dp else 20.dp)
+                        .align(Alignment.Center)
+                )
+            }
+
             // Search shortcut icon
             GlassCard(
-                modifier = Modifier.size(40.dp),
+                modifier = Modifier.size(if (isCompact) 36.dp else 40.dp),
                 shape = CircleShape,
                 backgroundColor = glass.searchBarBackground,
                 onClick = onSearchClick
@@ -273,14 +324,14 @@ fun HomeHeader(
                     contentDescription = "Search",
                     tint = glass.textPrimary,
                     modifier = Modifier
-                        .size(20.dp)
+                        .size(if (isCompact) 18.dp else 20.dp)
                         .align(Alignment.Center)
                 )
             }
 
             // Quick Theme switch
             GlassCard(
-                modifier = Modifier.size(40.dp),
+                modifier = Modifier.size(if (isCompact) 36.dp else 40.dp),
                 shape = CircleShape,
                 backgroundColor = glass.searchBarBackground,
                 onClick = onToggleTheme
@@ -290,7 +341,7 @@ fun HomeHeader(
                     contentDescription = "Switch Theme",
                     tint = if (glass.isDark) Color(0xFFFBBF24) else MercuryViolet,
                     modifier = Modifier
-                        .size(20.dp)
+                        .size(if (isCompact) 18.dp else 20.dp)
                         .align(Alignment.Center)
                 )
             }
@@ -305,12 +356,13 @@ fun HomeHeroCard(
     onQuickNote: () -> Unit
 ) {
     val glass = MercuryTheme.glass
+    val isCompact = MercuryTheme.isCompact
 
     GlassCard(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(horizontal = 20.dp, vertical = 8.dp),
-        shape = RoundedCornerShape(26.dp),
+            .padding(vertical = 6.dp),
+        shape = RoundedCornerShape(22.dp),
         backgroundColor = if (glass.isDark) Color(0xCC131A2D) else Color(0xF5FFFFFF),
         borderColor = if (glass.isDark) Color(0x338B5CF6) else Color(0x403B82F6),
         borderWidth = 1.dp
@@ -327,7 +379,7 @@ fun HomeHeroCard(
                         }
                     )
                 )
-                .padding(20.dp)
+                .padding(if (isCompact) 14.dp else 18.dp)
         ) {
             Row(
                 modifier = Modifier.fillMaxWidth(),
@@ -341,15 +393,15 @@ fun HomeHeroCard(
                         color = glass.textPrimary,
                         fontWeight = FontWeight.Bold
                     )
-                    Spacer(modifier = Modifier.height(4.dp))
+                    Spacer(modifier = Modifier.height(3.dp))
                     Text(
-                        text = "You have $notesCount active ${if (notesCount == 1) "note" else "notes"}. Tap + to jot down new thoughts.",
+                        text = "You have $notesCount active ${if (notesCount == 1) "note" else "notes"}. Tap Quick Note or use Voice to jot down thoughts.",
                         style = MaterialTheme.typography.bodyMedium,
                         color = glass.textSecondary,
                         maxLines = 2
                     )
 
-                    Spacer(modifier = Modifier.height(14.dp))
+                    Spacer(modifier = Modifier.height(12.dp))
 
                     Row(
                         modifier = Modifier
@@ -375,18 +427,18 @@ fun HomeHeroCard(
                     }
                 }
 
-                Spacer(modifier = Modifier.width(12.dp))
+                Spacer(modifier = Modifier.width(10.dp))
 
                 Box(
-                    modifier = Modifier.size(72.dp),
+                    modifier = Modifier.size(if (isCompact) 56.dp else 68.dp),
                     contentAlignment = Alignment.Center
                 ) {
                     Image(
                         painter = painterResource(id = R.drawable.hero_feather_card),
                         contentDescription = "Feather illustration",
                         modifier = Modifier
-                            .size(70.dp)
-                            .clip(RoundedCornerShape(16.dp)),
+                            .size(if (isCompact) 56.dp else 68.dp)
+                            .clip(RoundedCornerShape(14.dp)),
                         contentScale = ContentScale.Crop
                     )
                 }
@@ -402,7 +454,7 @@ fun HomeHeroCard(
                     imageVector = Icons.Default.Close,
                     contentDescription = "Dismiss",
                     tint = glass.textMuted,
-                    modifier = Modifier.size(16.dp)
+                    modifier = Modifier.size(15.dp)
                 )
             }
         }
@@ -416,9 +468,9 @@ fun FolderFilterRow(
     onSelectFolder: (Long?) -> Unit
 ) {
     LazyRow(
-        contentPadding = PaddingValues(horizontal = 20.dp),
         horizontalArrangement = Arrangement.spacedBy(8.dp),
-        verticalAlignment = Alignment.CenterVertically
+        verticalAlignment = Alignment.CenterVertically,
+        modifier = Modifier.fillMaxWidth()
     ) {
         item {
             FilterChipPill(
@@ -450,7 +502,7 @@ fun SectionHeader(
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(horizontal = 20.dp, vertical = 6.dp),
+            .padding(horizontal = 4.dp, vertical = 6.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
         if (icon != null) {
@@ -491,6 +543,8 @@ fun NoteCardItem(
     onDuplicate: () -> Unit
 ) {
     val glass = MercuryTheme.glass
+    val isCompact = MercuryTheme.isCompact
+    val fontScale = MercuryTheme.fontScale
     var menuExpanded by remember { mutableStateOf(false) }
 
     val formattedDate = remember(note.updatedAt) {
@@ -507,9 +561,9 @@ fun NoteCardItem(
     GlassCard(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(horizontal = 20.dp, vertical = 5.dp)
+            .padding(vertical = if (isCompact) 4.dp else 5.dp)
             .testTag("note_card_${note.id}"),
-        shape = RoundedCornerShape(20.dp),
+        shape = RoundedCornerShape(18.dp),
         backgroundColor = cardBg,
         borderColor = if (note.isPinned) MercuryViolet.copy(alpha = 0.5f) else glass.cardBorder,
         borderWidth = if (note.isPinned) 1.5.dp else 1.dp,
@@ -518,7 +572,7 @@ fun NoteCardItem(
         Column(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(16.dp)
+                .padding(if (isCompact) 12.dp else 15.dp)
         ) {
             // Top Row: Title + Pin/Favorite indicators + Menu
             Row(
@@ -531,6 +585,7 @@ fun NoteCardItem(
                     style = MaterialTheme.typography.titleMedium,
                     color = glass.textPrimary,
                     fontWeight = FontWeight.SemiBold,
+                    fontSize = (16 * fontScale).sp,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                     modifier = Modifier.weight(1f)
@@ -639,17 +694,18 @@ fun NoteCardItem(
 
             // Note Content Snippet
             if (note.content.isNotBlank()) {
-                Spacer(modifier = Modifier.height(6.dp))
+                Spacer(modifier = Modifier.height(5.dp))
                 Text(
                     text = note.content,
                     style = MaterialTheme.typography.bodyMedium,
+                    fontSize = (14 * fontScale).sp,
                     color = glass.textSecondary,
                     maxLines = 2,
                     overflow = TextOverflow.Ellipsis
                 )
             }
 
-            Spacer(modifier = Modifier.height(12.dp))
+            Spacer(modifier = Modifier.height(10.dp))
 
             // Bottom Row: Date & Folder badge & Image attachment tag
             Row(
@@ -707,20 +763,21 @@ fun NoteCardItem(
 @Composable
 fun EmptyNotesState(
     isFiltered: Boolean,
-    onCreateNote: () -> Unit
+    onCreateNote: () -> Unit,
+    onImportFile: () -> Unit
 ) {
     val glass = MercuryTheme.glass
 
     Column(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(horizontal = 32.dp, vertical = 48.dp),
+            .padding(horizontal = 24.dp, vertical = 40.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.Center
     ) {
         Box(
             modifier = Modifier
-                .size(72.dp)
+                .size(70.dp)
                 .clip(CircleShape)
                 .background(glass.searchBarBackground),
             contentAlignment = Alignment.Center
@@ -736,7 +793,7 @@ fun EmptyNotesState(
         Spacer(modifier = Modifier.height(16.dp))
 
         Text(
-            text = if (isFiltered) "No notes in this folder" else "No notes created yet",
+            text = if (isFiltered) "No notes in this folder" else "No notes found",
             style = MaterialTheme.typography.titleMedium,
             color = glass.textPrimary,
             fontWeight = FontWeight.Bold
@@ -745,7 +802,7 @@ fun EmptyNotesState(
         Spacer(modifier = Modifier.height(6.dp))
 
         Text(
-            text = if (isFiltered) "Create a note in this folder to get started" else "Tap below to capture your first idea in Mercurynotes",
+            text = if (isFiltered) "Create a note in this folder to get started" else "Create your first note or import documents, PDF, TXT, CSV, or fonts",
             style = MaterialTheme.typography.bodyMedium,
             color = glass.textSecondary,
             modifier = Modifier.padding(horizontal = 16.dp)
@@ -753,9 +810,11 @@ fun EmptyNotesState(
 
         Spacer(modifier = Modifier.height(20.dp))
 
-        GlowingGradientButton(
-            text = "Create Note",
-            onClick = onCreateNote
-        )
+        Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+            GlowingGradientButton(
+                text = "New Note",
+                onClick = onCreateNote
+            )
+        }
     }
 }

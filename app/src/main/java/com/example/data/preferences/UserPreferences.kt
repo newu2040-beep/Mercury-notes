@@ -7,10 +7,22 @@ enum class ThemeMode {
     LIGHT, DARK, SYSTEM
 }
 
+enum class PastelThemePreset(val id: String, val displayName: String) {
+    MERCURY("mercury", "Classic Mercury"),
+    LAVENDER("lavender", "Pastel Lavender"),
+    PEACH("peach", "Pastel Peach"),
+    MINT("mint", "Pastel Mint"),
+    ROSE("rose", "Pastel Sakura"),
+    OCEAN("ocean", "Pastel Ocean"),
+    LIQUID_OPAL("opal", "Liquid Glass Opal"),
+    MIDNIGHT("midnight", "Midnight Obsidian")
+}
+
 enum class NoteFontSize(val displayName: String, val scale: Float) {
-    SMALL("Small", 0.9f),
+    SMALL("Small", 0.85f),
     MEDIUM("Standard", 1.0f),
-    LARGE("Large", 1.15f)
+    LARGE("Large", 1.20f),
+    EXTRA_LARGE("Extra Large", 1.35f)
 }
 
 class UserPreferences(context: Context) {
@@ -26,6 +38,25 @@ class UserPreferences(context: Context) {
             }
         }
         set(value) = prefs.edit().putString("theme_mode", value.name).apply()
+
+    var pastelTheme: PastelThemePreset
+        get() {
+            val value = prefs.getString("pastel_theme", PastelThemePreset.MERCURY.name) ?: PastelThemePreset.MERCURY.name
+            return try {
+                PastelThemePreset.valueOf(value)
+            } catch (e: Exception) {
+                PastelThemePreset.MERCURY
+            }
+        }
+        set(value) = prefs.edit().putString("pastel_theme", value.name).apply()
+
+    var liquidGlassEnabled: Boolean
+        get() = prefs.getBoolean("liquid_glass_enabled", true)
+        set(value) = prefs.edit().putBoolean("liquid_glass_enabled", value).apply()
+
+    var compactMode: Boolean
+        get() = prefs.getBoolean("compact_mode", false)
+        set(value) = prefs.edit().putBoolean("compact_mode", value).apply()
 
     var autoSaveEnabled: Boolean
         get() = prefs.getBoolean("auto_save", true)
@@ -45,6 +76,10 @@ class UserPreferences(context: Context) {
             }
         }
         set(value) = prefs.edit().putString("font_size", value.name).apply()
+
+    var customFontName: String?
+        get() = prefs.getString("custom_font_name", null)
+        set(value) = prefs.edit().putString("custom_font_name", value).apply()
 
     var reduceTransparency: Boolean
         get() = prefs.getBoolean("reduce_transparency", false)

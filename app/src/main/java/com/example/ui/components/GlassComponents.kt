@@ -75,11 +75,26 @@ fun GlassCard(
     onClick: (() -> Unit)? = null,
     content: @Composable BoxScope.() -> Unit
 ) {
+    val glass = MercuryTheme.glass
+    val isLiquid = glass.isLiquidGlass
+
+    val borderBrush = if (isLiquid) {
+        Brush.linearGradient(
+            colors = listOf(
+                borderColor,
+                glass.primaryAccent.copy(alpha = if (glass.isDark) 0.35f else 0.25f),
+                borderColor.copy(alpha = 0.15f)
+            )
+        )
+    } else {
+        SolidColor(borderColor)
+    }
+
     val cardModifier = modifier
         .then(if (elevation > 0.dp) Modifier.shadow(elevation, shape) else Modifier)
         .clip(shape)
         .background(backgroundColor)
-        .border(BorderStroke(borderWidth, borderColor), shape)
+        .border(borderWidth, borderBrush, shape)
         .then(
             if (onClick != null) {
                 Modifier.clickable(
@@ -105,6 +120,7 @@ fun GlowingGradientButton(
     testTag: String = "new_note_button"
 ) {
     val glowColor = MercuryTheme.glass.glowColor
+    val isCompact = MercuryTheme.isCompact
 
     Box(
         modifier = modifier
@@ -120,7 +136,10 @@ fun GlowingGradientButton(
             .clip(RoundedCornerShape(30.dp))
             .background(MercuryPrimaryGradient)
             .clickable(onClick = onClick)
-            .padding(horizontal = 20.dp, vertical = 14.dp),
+            .padding(
+                horizontal = if (isCompact) 14.dp else 20.dp,
+                vertical = if (isCompact) 10.dp else 14.dp
+            ),
         contentAlignment = Alignment.Center
     ) {
         Row(
@@ -131,14 +150,14 @@ fun GlowingGradientButton(
                 imageVector = icon,
                 contentDescription = null,
                 tint = Color.White,
-                modifier = Modifier.size(20.dp)
+                modifier = Modifier.size(if (isCompact) 18.dp else 20.dp)
             )
-            Spacer(modifier = Modifier.width(8.dp))
+            Spacer(modifier = Modifier.width(6.dp))
             Text(
                 text = text,
                 color = Color.White,
                 fontWeight = FontWeight.SemiBold,
-                fontSize = 15.sp
+                fontSize = if (isCompact) 13.sp else 15.sp
             )
         }
     }
@@ -368,6 +387,8 @@ fun InteractiveChecklistRow(
     modifier: Modifier = Modifier
 ) {
     val glass = MercuryTheme.glass
+    val fontScale = MercuryTheme.fontScale
+    val fontSize = (15 * fontScale).sp
 
     Row(
         modifier = modifier
@@ -407,7 +428,7 @@ fun InteractiveChecklistRow(
         Text(
             text = text,
             color = if (isChecked) glass.textMuted else glass.textPrimary,
-            fontSize = 15.sp,
+            fontSize = fontSize,
             textDecoration = if (isChecked) TextDecoration.LineThrough else TextDecoration.None,
             modifier = Modifier.weight(1f)
         )
