@@ -258,9 +258,9 @@ fun DeletedNoteCardItem(
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 TextButton(onClick = onRestore) {
-                    Icon(Icons.Default.Restore, contentDescription = null, tint = MercuryViolet, modifier = Modifier.size(16.dp))
+                    Icon(Icons.Default.Restore, contentDescription = null, tint = glass.primaryAccent, modifier = Modifier.size(16.dp))
                     Spacer(modifier = Modifier.width(4.dp))
-                    Text("Restore", color = MercuryViolet)
+                    Text("Restore", color = glass.primaryAccent)
                 }
 
                 Spacer(modifier = Modifier.width(8.dp))

@@ -74,11 +74,9 @@ import com.example.data.preferences.ThemeMode
 import com.example.ui.components.FilterChipPill
 import com.example.ui.components.GlassCard
 import com.example.ui.components.GlowingGradientButton
-import com.example.ui.theme.MercuryBlue
-import com.example.ui.theme.MercuryPink
-import com.example.ui.theme.MercuryPrimaryGradient
+import com.example.ui.components.MoltenGlassCard
+import com.example.ui.components.MoltenGlassPanel
 import com.example.ui.theme.MercuryTheme
-import com.example.ui.theme.MercuryViolet
 import com.example.ui.viewmodel.NotesViewModel
 import com.example.util.FileImporter
 import java.text.SimpleDateFormat
@@ -264,11 +262,11 @@ fun HomeHeader(
         ) {
             // App Icon Logo
             Image(
-                painter = painterResource(id = R.drawable.mercurynotes_icon),
+                painter = painterResource(id = R.drawable.mercurynotes_logo_1787768712898),
                 contentDescription = "Mercurynotes Logo",
                 modifier = Modifier
                     .size(if (isCompact) 36.dp else 42.dp)
-                    .clip(RoundedCornerShape(12.dp)),
+                    .clip(CircleShape),
                 contentScale = ContentScale.Crop
             )
 
@@ -339,7 +337,7 @@ fun HomeHeader(
                 Icon(
                     imageVector = if (glass.isDark) Icons.Default.LightMode else Icons.Default.DarkMode,
                     contentDescription = "Switch Theme",
-                    tint = if (glass.isDark) Color(0xFFFBBF24) else MercuryViolet,
+                    tint = if (glass.isDark) Color(0xFFFBBF24) else glass.primaryAccent,
                     modifier = Modifier
                         .size(if (isCompact) 18.dp else 20.dp)
                         .align(Alignment.Center)
@@ -358,27 +356,16 @@ fun HomeHeroCard(
     val glass = MercuryTheme.glass
     val isCompact = MercuryTheme.isCompact
 
-    GlassCard(
+    MoltenGlassPanel(
         modifier = Modifier
             .fillMaxWidth()
             .padding(vertical = 6.dp),
-        shape = RoundedCornerShape(22.dp),
-        backgroundColor = if (glass.isDark) Color(0xCC131A2D) else Color(0xF5FFFFFF),
-        borderColor = if (glass.isDark) Color(0x338B5CF6) else Color(0x403B82F6),
-        borderWidth = 1.dp
+        shape = RoundedCornerShape(24.dp)
     ) {
         Box(
             modifier = Modifier
                 .fillMaxWidth()
-                .background(
-                    Brush.horizontalGradient(
-                        colors = if (glass.isDark) {
-                            listOf(Color(0x334F46E5), Color(0x1F7C3AED), Color(0x1ADB2777))
-                        } else {
-                            listOf(Color(0x243B82F6), Color(0x1A8B5CF6), Color(0x14EC4899))
-                        }
-                    )
-                )
+                .background(glass.heroGradient)
                 .padding(if (isCompact) 14.dp else 18.dp)
         ) {
             Row(
@@ -406,7 +393,7 @@ fun HomeHeroCard(
                     Row(
                         modifier = Modifier
                             .clip(RoundedCornerShape(20.dp))
-                            .background(MercuryPrimaryGradient)
+                            .background(glass.buttonGradient)
                             .clickable(onClick = onQuickNote)
                             .padding(horizontal = 14.dp, vertical = 7.dp),
                         verticalAlignment = Alignment.CenterVertically
@@ -509,7 +496,7 @@ fun SectionHeader(
             Icon(
                 imageVector = icon,
                 contentDescription = null,
-                tint = MercuryViolet,
+                tint = glass.primaryAccent,
                 modifier = Modifier.size(16.dp)
             )
             Spacer(modifier = Modifier.width(6.dp))
@@ -558,20 +545,18 @@ fun NoteCardItem(
         glass.cardBackground
     }
 
-    GlassCard(
+    MoltenGlassCard(
         modifier = Modifier
             .fillMaxWidth()
             .padding(vertical = if (isCompact) 4.dp else 5.dp)
             .testTag("note_card_${note.id}"),
         shape = RoundedCornerShape(18.dp),
-        backgroundColor = cardBg,
-        borderColor = if (note.isPinned) MercuryViolet.copy(alpha = 0.5f) else glass.cardBorder,
-        borderWidth = if (note.isPinned) 1.5.dp else 1.dp,
         onClick = onClick
     ) {
         Column(
             modifier = Modifier
                 .fillMaxWidth()
+                .background(cardBg)
                 .padding(if (isCompact) 12.dp else 15.dp)
         ) {
             // Top Row: Title + Pin/Favorite indicators + Menu
@@ -599,7 +584,7 @@ fun NoteCardItem(
                         Icon(
                             imageVector = Icons.Default.PushPin,
                             contentDescription = "Pinned",
-                            tint = MercuryViolet,
+                            tint = glass.primaryAccent,
                             modifier = Modifier.size(16.dp)
                         )
                     }
@@ -608,7 +593,7 @@ fun NoteCardItem(
                         Icon(
                             imageVector = Icons.Default.Favorite,
                             contentDescription = "Favorite",
-                            tint = MercuryPink,
+                            tint = glass.secondaryAccent,
                             modifier = Modifier.size(16.dp)
                         )
                     }
@@ -785,7 +770,7 @@ fun EmptyNotesState(
             Icon(
                 imageVector = Icons.Default.Edit,
                 contentDescription = null,
-                tint = MercuryViolet,
+                tint = glass.primaryAccent,
                 modifier = Modifier.size(32.dp)
             )
         }

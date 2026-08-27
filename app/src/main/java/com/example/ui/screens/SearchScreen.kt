@@ -149,7 +149,7 @@ fun SearchScreen(
                             Icon(
                                 imageVector = Icons.Default.History,
                                 contentDescription = null,
-                                tint = MercuryViolet,
+                                tint = glass.primaryAccent,
                                 modifier = Modifier.size(16.dp)
                             )
                             Spacer(modifier = Modifier.width(6.dp))
@@ -164,7 +164,7 @@ fun SearchScreen(
                         Text(
                             text = "Clear",
                             style = MaterialTheme.typography.labelSmall,
-                            color = MercuryViolet,
+                            color = glass.primaryAccent,
                             fontWeight = FontWeight.SemiBold,
                             modifier = Modifier
                                 .clickable { viewModel.clearRecentSearches() }

@@ -1,11 +1,18 @@
 package com.example.ui.navigation
 
 import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.Spring
+import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
+import androidx.compose.animation.scaleIn
+import androidx.compose.animation.scaleOut
 import androidx.compose.animation.slideInHorizontally
+import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutHorizontally
+import androidx.compose.animation.slideOutVertically
 import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
@@ -67,11 +74,7 @@ import com.example.ui.screens.HomeScreen
 import com.example.ui.screens.SearchScreen
 import com.example.ui.screens.SettingsScreen
 import com.example.ui.screens.TrashScreen
-import com.example.ui.theme.MercuryBlue
-import com.example.ui.theme.MercuryPink
-import com.example.ui.theme.MercuryPrimaryGradient
 import com.example.ui.theme.MercuryTheme
-import com.example.ui.theme.MercuryViolet
 import com.example.ui.theme.MercurynotesTheme
 import com.example.ui.viewmodel.NotesViewModel
 
@@ -102,10 +105,42 @@ fun MercurynotesApp(
     val liquidGlassEnabled by viewModel.liquidGlassEnabled.collectAsStateWithLifecycle()
     val compactMode by viewModel.compactMode.collectAsStateWithLifecycle()
     val fontSize by viewModel.fontSize.collectAsStateWithLifecycle()
+    val fontPreset by viewModel.fontPreset.collectAsStateWithLifecycle()
+    val customFontPath by viewModel.customFontPath.collectAsStateWithLifecycle()
     val reduceTransparency by viewModel.reduceTransparency.collectAsStateWithLifecycle()
+    val translucencyLevel by viewModel.translucencyLevel.collectAsStateWithLifecycle()
+    val ambientBackdropGlow by viewModel.ambientBackdropGlow.collectAsStateWithLifecycle()
+    val highRefreshRateEnabled by viewModel.highRefreshRateEnabled.collectAsStateWithLifecycle()
     val isAppLocked by viewModel.isAppLocked.collectAsStateWithLifecycle()
 
     var currentScreen by remember { mutableStateOf<ScreenDestination>(ScreenDestination.Main()) }
+
+    val context = androidx.compose.ui.platform.LocalContext.current
+    val view = androidx.compose.ui.platform.LocalView.current
+    androidx.compose.runtime.LaunchedEffect(highRefreshRateEnabled, view) {
+        val activity = context as? android.app.Activity ?: (context as? android.content.ContextWrapper)?.baseContext as? android.app.Activity
+        activity?.let {
+            if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.M) {
+                val window = it.window
+                val attributes = window.attributes
+                if (highRefreshRateEnabled) {
+                    val display = if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.R) {
+                        context.display
+                    } else {
+                        @Suppress("DEPRECATION")
+                        it.windowManager.defaultDisplay
+                    }
+                    val maxMode = display?.supportedModes?.maxByOrNull { mode -> mode.refreshRate }
+                    if (maxMode != null) {
+                        attributes.preferredDisplayModeId = maxMode.modeId
+                    }
+                } else {
+                    attributes.preferredDisplayModeId = 0 // default
+                }
+                window.attributes = attributes
+            }
+        }
+    }
 
     MercurynotesTheme(
         themeMode = themeMode,
@@ -113,7 +148,10 @@ fun MercurynotesApp(
         liquidGlassEnabled = liquidGlassEnabled,
         compactMode = compactMode,
         fontSize = fontSize,
-        reduceTransparency = reduceTransparency
+        fontPreset = fontPreset,
+        customFontPath = customFontPath,
+        reduceTransparency = reduceTransparency,
+        translucencyLevel = translucencyLevel
     ) {
         val glass = MercuryTheme.glass
 
@@ -128,17 +166,44 @@ fun MercurynotesApp(
                     .fillMaxSize()
                     .background(glass.canvasBackground)
             ) {
+                com.example.ui.components.TranslucentBackdropCanvas(
+                    enabled = ambientBackdropGlow && !reduceTransparency,
+                    animate = !viewModel.reduceMotion.collectAsStateWithLifecycle().value
+                )
+
                 AnimatedContent(
                     targetState = currentScreen,
                     transitionSpec = {
                         if (targetState is ScreenDestination.Editor) {
-                            (slideInHorizontally(tween(300)) { it } + fadeIn(tween(300)))
-                                .togetherWith(slideOutHorizontally(tween(300)) { -it / 3 } + fadeOut(tween(300)))
+                            (slideInVertically(
+                                animationSpec = spring(
+                                    dampingRatio = Spring.DampingRatioLowBouncy,
+                                    stiffness = Spring.StiffnessMediumLow
+                                )
+                            ) { it / 4 } + fadeIn(tween(280, easing = FastOutSlowInEasing)) + scaleIn(
+                                initialScale = 0.94f,
+                                animationSpec = spring(dampingRatio = 0.85f, stiffness = 400f)
+                            )).togetherWith(
+                                slideOutVertically(tween(220, easing = FastOutSlowInEasing)) { -it / 10 } +
+                                        fadeOut(tween(200)) +
+                                        scaleOut(targetScale = 0.97f)
+                            )
                         } else if (initialState is ScreenDestination.Editor) {
-                            (slideInHorizontally(tween(300)) { -it / 3 } + fadeIn(tween(300)))
-                                .togetherWith(slideOutHorizontally(tween(300)) { it } + fadeOut(tween(300)))
+                            (slideInVertically(
+                                animationSpec = spring(dampingRatio = 0.85f, stiffness = 400f)
+                            ) { -it / 10 } + fadeIn(tween(240)) + scaleIn(
+                                initialScale = 0.97f
+                            )).togetherWith(
+                                slideOutVertically(
+                                    animationSpec = spring(dampingRatio = 0.9f, stiffness = 450f)
+                                ) { it / 4 } + fadeOut(tween(220)) + scaleOut(targetScale = 0.94f)
+                            )
+                        } else if (targetState is ScreenDestination.Trash || initialState is ScreenDestination.Trash) {
+                            (slideInHorizontally(tween(300, easing = FastOutSlowInEasing)) { it / 2 } + fadeIn(tween(300)))
+                                .togetherWith(slideOutHorizontally(tween(300, easing = FastOutSlowInEasing)) { -it / 3 } + fadeOut(tween(300)))
                         } else {
-                            fadeIn(tween(250)) togetherWith fadeOut(tween(250))
+                            (fadeIn(tween(240, easing = FastOutSlowInEasing)) + scaleIn(initialScale = 0.98f, animationSpec = tween(240)))
+                                .togetherWith(fadeOut(tween(200, easing = FastOutSlowInEasing)) + scaleOut(targetScale = 1.02f, animationSpec = tween(200)))
                         }
                     },
                     label = "fluid_screen_transition"
@@ -268,7 +333,7 @@ fun FrostedBottomNavigation(
                             .then(
                                 if (isSelected) {
                                     Modifier.background(
-                                        if (glass.isDark) Color(0x338B5CF6) else Color(0x223B82F6)
+                                        glass.primaryAccent.copy(alpha = if (glass.isDark) 0.24f else 0.16f)
                                     )
                                 } else Modifier
                             )
@@ -289,7 +354,7 @@ fun FrostedBottomNavigation(
                             Icon(
                                 imageVector = if (isSelected) tab.selectedIcon else tab.unselectedIcon,
                                 contentDescription = tab.title,
-                                tint = if (isSelected) MercuryViolet else glass.textSecondary,
+                                tint = if (isSelected) glass.primaryAccent else glass.textSecondary,
                                 modifier = Modifier.size(if (isCompact) 18.dp else 20.dp)
                             )
 
@@ -297,7 +362,7 @@ fun FrostedBottomNavigation(
                                 Spacer(modifier = Modifier.width(6.dp))
                                 Text(
                                     text = tab.title,
-                                    color = if (glass.isDark) Color.White else MercuryViolet,
+                                    color = if (glass.isDark) Color.White else glass.primaryAccent,
                                     fontSize = if (isCompact) 12.sp else 13.sp,
                                     fontWeight = FontWeight.SemiBold
                                 )

@@ -9,9 +9,11 @@ import android.speech.RecognitionListener
 import android.speech.RecognizerIntent
 import android.speech.SpeechRecognizer
 import android.widget.Toast
+import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.infiniteRepeatable
@@ -19,6 +21,10 @@ import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
+import androidx.compose.animation.scaleIn
+import androidx.compose.animation.scaleOut
+import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.slideOutVertically
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -88,6 +94,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -98,10 +105,17 @@ import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.OffsetMapping
 import androidx.compose.ui.text.input.TextFieldValue
+import androidx.compose.ui.text.input.TransformedText
+import androidx.compose.ui.text.input.VisualTransformation
+import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -111,14 +125,15 @@ import com.example.data.model.FolderEntity
 import com.example.data.model.NoteEntity
 import com.example.ui.components.GlassCard
 import com.example.ui.components.InteractiveChecklistRow
-import com.example.ui.theme.MercuryPink
+import com.example.ui.components.MoltenGlassCard
 import com.example.ui.theme.MercuryTheme
-import com.example.ui.theme.MercuryViolet
 import com.example.ui.theme.NoteTintOptions
 import com.example.ui.viewmodel.NotesViewModel
 import com.example.util.ExportFormat
 import com.example.util.FileImporter
 import com.example.util.NotesExporter
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -257,6 +272,60 @@ fun EditorScreen(
         }
     }
 
+    fun applyFormatting(prefix: String, suffix: String, defaultPlaceholder: String) {
+        val text = contentValue.text
+        val start = contentValue.selection.min.coerceIn(0, text.length)
+        val end = contentValue.selection.max.coerceIn(0, text.length)
+
+        if (start != end) {
+            val selected = text.substring(start, end)
+            val isAlreadyWrapped = start >= prefix.length &&
+                    end + suffix.length <= text.length &&
+                    text.substring(start - prefix.length, start) == prefix &&
+                    text.substring(end, end + suffix.length) == suffix
+
+            if (isAlreadyWrapped) {
+                val unwrapped = text.substring(0, start - prefix.length) + selected + text.substring(end + suffix.length)
+                val newSel = TextRange(start - prefix.length, start - prefix.length + selected.length)
+                contentValue = TextFieldValue(unwrapped, newSel)
+            } else {
+                val wrapped = text.substring(0, start) + prefix + selected + suffix + text.substring(end)
+                val newSel = TextRange(start + prefix.length, start + prefix.length + selected.length)
+                contentValue = TextFieldValue(wrapped, newSel)
+            }
+        } else {
+            val before = text.substring(0, start)
+            val after = text.substring(start)
+            val wordStartOffset = before.lastIndexOfAny(charArrayOf(' ', '\n', '\t', '.', ',', ';', '!', '?', '(', ')', '[', ']', '{', '}'))
+            val wordStart = if (wordStartOffset == -1) 0 else wordStartOffset + 1
+            val wordEndOffset = after.indexOfAny(charArrayOf(' ', '\n', '\t', '.', ',', ';', '!', '?', '(', ')', '[', ']', '{', '}'))
+            val wordEnd = if (wordEndOffset == -1) text.length else start + wordEndOffset
+
+            if (wordEnd > wordStart) {
+                val word = text.substring(wordStart, wordEnd)
+                val wrapped = text.substring(0, wordStart) + prefix + word + suffix + text.substring(wordEnd)
+                val newSel = TextRange(wordStart + prefix.length + word.length + suffix.length)
+                contentValue = TextFieldValue(wrapped, newSel)
+            } else {
+                val placeholder = defaultPlaceholder
+                val wrapped = text.substring(0, start) + prefix + placeholder + suffix + text.substring(start)
+                val newSel = TextRange(start + prefix.length, start + prefix.length + placeholder.length)
+                contentValue = TextFieldValue(wrapped, newSel)
+            }
+        }
+    }
+
+    fun insertLinePrefix(prefix: String) {
+        val text = contentValue.text
+        val start = contentValue.selection.min.coerceIn(0, text.length)
+        val end = contentValue.selection.max.coerceIn(0, text.length)
+
+        val needsLeadingNewline = start > 0 && text[start - 1] != '\n'
+        val insert = if (needsLeadingNewline) "\n$prefix" else prefix
+        val newText = text.substring(0, start) + insert + text.substring(end)
+        contentValue = TextFieldValue(newText, TextRange(start + insert.length))
+    }
+
     fun performSave() {
         if (title.isBlank() && contentValue.text.isBlank() && checklistItems.isEmpty() && imageUri.isNullOrBlank()) {
             return
@@ -322,6 +391,26 @@ fun EditorScreen(
         Color.Transparent
     }
 
+    val coroutineScope = rememberCoroutineScope()
+    var isContentVisible by remember { mutableStateOf(false) }
+
+    LaunchedEffect(Unit) {
+        isContentVisible = true
+    }
+
+    fun handleBack() {
+        coroutineScope.launch {
+            performSave()
+            isContentVisible = false
+            delay(150)
+            onBack()
+        }
+    }
+
+    BackHandler {
+        handleBack()
+    }
+
     Box(
         modifier = modifier
             .fillMaxSize()
@@ -331,478 +420,461 @@ fun EditorScreen(
             .navigationBarsPadding()
             .imePadding()
     ) {
-        Column(
+        AnimatedVisibility(
+            visible = isContentVisible,
+            enter = fadeIn(animationSpec = tween(280, easing = FastOutSlowInEasing)) +
+                    slideInVertically(animationSpec = tween(300, easing = FastOutSlowInEasing)) { it / 16 } +
+                    scaleIn(initialScale = 0.98f, animationSpec = tween(280)),
+            exit = fadeOut(animationSpec = tween(180, easing = FastOutSlowInEasing)) +
+                    slideOutVertically(animationSpec = tween(180, easing = FastOutSlowInEasing)) { it / 24 } +
+                    scaleOut(targetScale = 0.98f, animationSpec = tween(180)),
             modifier = Modifier.fillMaxSize()
         ) {
-            // Top Bar
-            EditorTopBar(
-                onBack = {
-                    performSave()
-                    onBack()
-                },
-                selectedFolder = selectedFolder,
-                onFolderClick = { folderDropdownOpen = true },
-                isFavorite = isFavorite,
-                onToggleFavorite = {
-                    isFavorite = !isFavorite
-                    performSave()
-                },
-                onVoiceClick = { triggerVoiceTyping() },
-                onShareClick = { showExportSheet = true },
-                onMoreClick = { moreMenuOpen = true }
-            )
+            Column(
+                modifier = Modifier.fillMaxSize()
+            ) {
+                // Top Bar
+                EditorTopBar(
+                    onBack = { handleBack() },
+                    selectedFolder = selectedFolder,
+                    onFolderClick = { folderDropdownOpen = true },
+                    isFavorite = isFavorite,
+                    onToggleFavorite = {
+                        isFavorite = !isFavorite
+                        performSave()
+                    },
+                    onVoiceClick = { triggerVoiceTyping() },
+                    onShareClick = { showExportSheet = true },
+                    onMoreClick = { moreMenuOpen = true }
+                )
 
-            // Folder Dropdown Menu
-            Box(modifier = Modifier.padding(start = if (isCompact) 40.dp else 60.dp)) {
-                DropdownMenu(
-                    expanded = folderDropdownOpen,
-                    onDismissRequest = { folderDropdownOpen = false },
-                    modifier = Modifier.background(glass.cardBackgroundElevated)
-                ) {
-                    folders.forEach { folder ->
-                        DropdownMenuItem(
-                            text = {
-                                Row(verticalAlignment = Alignment.CenterVertically) {
-                                    Box(
-                                        modifier = Modifier
-                                            .size(8.dp)
-                                            .clip(CircleShape)
-                                            .background(Color(folder.color))
-                                    )
-                                    Spacer(modifier = Modifier.width(8.dp))
-                                    Text(folder.name, color = glass.textPrimary)
+                // Folder Dropdown Menu
+                Box(modifier = Modifier.padding(start = if (isCompact) 40.dp else 60.dp)) {
+                    DropdownMenu(
+                        expanded = folderDropdownOpen,
+                        onDismissRequest = { folderDropdownOpen = false },
+                        modifier = Modifier.background(glass.cardBackgroundElevated)
+                    ) {
+                        folders.forEach { folder ->
+                            DropdownMenuItem(
+                                text = {
+                                    Row(verticalAlignment = Alignment.CenterVertically) {
+                                        Box(
+                                            modifier = Modifier
+                                                .size(8.dp)
+                                                .clip(CircleShape)
+                                                .background(Color(folder.color))
+                                        )
+                                        Spacer(modifier = Modifier.width(8.dp))
+                                        Text(folder.name, color = glass.textPrimary)
+                                    }
+                                },
+                                onClick = {
+                                    selectedFolder = folder
+                                    folderDropdownOpen = false
+                                    performSave()
                                 }
-                            },
-                            onClick = {
-                                selectedFolder = folder
-                                folderDropdownOpen = false
-                                performSave()
-                            }
-                        )
+                            )
+                        }
                     }
                 }
-            }
 
-            // More Options Dropdown Menu
-            Box(modifier = Modifier.align(Alignment.End).padding(end = 16.dp)) {
-                DropdownMenu(
-                    expanded = moreMenuOpen,
-                    onDismissRequest = { moreMenuOpen = false },
-                    modifier = Modifier.background(glass.cardBackgroundElevated)
-                ) {
-                    DropdownMenuItem(
-                        text = { Text("Color Tint", color = glass.textPrimary) },
-                        onClick = {
-                            moreMenuOpen = false
-                            colorPickerOpen = !colorPickerOpen
-                        },
-                        leadingIcon = {
-                            Icon(Icons.Default.Palette, contentDescription = null, tint = MercuryViolet)
-                        }
-                    )
-
-                    DropdownMenuItem(
-                        text = { Text(if (isPinned) "Unpin Note" else "Pin Note", color = glass.textPrimary) },
-                        onClick = {
-                            moreMenuOpen = false
-                            isPinned = !isPinned
-                            performSave()
-                        },
-                        leadingIcon = {
-                            Icon(Icons.Default.Bookmark, contentDescription = null, tint = glass.textSecondary)
-                        }
-                    )
-
-                    DropdownMenuItem(
-                        text = { Text(if (isLocked) "Unlock Note" else "Lock Note (Biometric)", color = glass.textPrimary) },
-                        onClick = {
-                            moreMenuOpen = false
-                            isLocked = !isLocked
-                            performSave()
-                            Toast.makeText(context, if (isLocked) "Note locked" else "Note unlocked", Toast.LENGTH_SHORT).show()
-                        },
-                        leadingIcon = {
-                            Icon(if (isLocked) Icons.Default.LockOpen else Icons.Default.Lock, contentDescription = null, tint = MercuryPink)
-                        }
-                    )
-
-                    DropdownMenuItem(
-                        text = { Text("Import Document / Font", color = glass.textPrimary) },
-                        onClick = {
-                            moreMenuOpen = false
-                            filePickerLauncher.launch("*/*")
-                        },
-                        leadingIcon = {
-                            Icon(Icons.Default.AttachFile, contentDescription = null, tint = MercuryTheme.glass.secondaryAccent)
-                        }
-                    )
-
-                    DropdownMenuItem(
-                        text = { Text("Export Note (PDF, CSV, TXT, JSON)", color = glass.textPrimary) },
-                        onClick = {
-                            moreMenuOpen = false
-                            showExportSheet = true
-                        },
-                        leadingIcon = {
-                            Icon(Icons.Default.Share, contentDescription = null, tint = MercuryViolet)
-                        }
-                    )
-
-                    if (currentNoteId > 0L) {
+                // More Options Dropdown Menu
+                Box(modifier = Modifier.align(Alignment.End).padding(end = 16.dp)) {
+                    DropdownMenu(
+                        expanded = moreMenuOpen,
+                        onDismissRequest = { moreMenuOpen = false },
+                        modifier = Modifier.background(glass.cardBackgroundElevated)
+                    ) {
                         DropdownMenuItem(
-                            text = { Text("Move to Trash", color = Color(0xFFEF4444)) },
+                            text = { Text("Color Tint", color = glass.textPrimary) },
                             onClick = {
                                 moreMenuOpen = false
-                                viewModel.moveToTrash(currentNoteId)
-                                onBack()
+                                colorPickerOpen = !colorPickerOpen
                             },
                             leadingIcon = {
-                                Icon(Icons.Default.Delete, contentDescription = null, tint = Color(0xFFEF4444))
+                                Icon(Icons.Default.Palette, contentDescription = null, tint = glass.primaryAccent)
                             }
                         )
-                    }
-                }
-            }
 
-            // Color Palette Selector Row (if toggled)
-            AnimatedVisibility(visible = colorPickerOpen) {
-                LazyRow(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = if (isCompact) 12.dp else 20.dp, vertical = 6.dp),
-                    horizontalArrangement = Arrangement.spacedBy(10.dp),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    items(NoteTintOptions) { (colorVal, pair) ->
-                        val (_, displayColor) = pair
-                        val isSelected = colorTag == colorVal
-
-                        Box(
-                            modifier = Modifier
-                                .size(34.dp)
-                                .clip(CircleShape)
-                                .background(if (colorVal == 0L) glass.cardBackgroundElevated else displayColor)
-                                .border(
-                                    width = if (isSelected) 2.5.dp else 1.dp,
-                                    color = if (isSelected) MercuryViolet else glass.cardBorder,
-                                    shape = CircleShape
-                                )
-                                .clickable {
-                                    colorTag = colorVal
-                                    performSave()
-                                },
-                            contentAlignment = Alignment.Center
-                        ) {
-                            if (colorVal == 0L) {
-                                Text("∅", color = glass.textSecondary, fontSize = 14.sp)
+                        DropdownMenuItem(
+                            text = { Text(if (isPinned) "Unpin Note" else "Pin Note", color = glass.textPrimary) },
+                            onClick = {
+                                moreMenuOpen = false
+                                isPinned = !isPinned
+                                performSave()
+                            },
+                            leadingIcon = {
+                                Icon(Icons.Default.Bookmark, contentDescription = null, tint = glass.textSecondary)
                             }
-                        }
-                    }
-                }
-            }
+                        )
 
-            // Main Editor Scrollable Content
-            LazyColumn(
-                modifier = Modifier
-                    .weight(1f)
-                    .fillMaxWidth(),
-                contentPadding = PaddingValues(horizontal = if (isCompact) 12.dp else 20.dp, vertical = 8.dp)
-            ) {
-                // Attached Image (if any)
-                if (!imageUri.isNullOrBlank()) {
-                    item {
-                        Box(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .height(if (isCompact) 180.dp else 220.dp)
-                                .clip(RoundedCornerShape(18.dp))
-                                .border(1.dp, glass.cardBorder, RoundedCornerShape(18.dp))
-                        ) {
-                            AsyncImage(
-                                model = imageUri,
-                                contentDescription = "Attached image",
-                                modifier = Modifier.fillMaxSize(),
-                                contentScale = ContentScale.Crop
-                            )
+                        DropdownMenuItem(
+                            text = { Text(if (isLocked) "Unlock Note" else "Lock Note (Biometric)", color = glass.textPrimary) },
+                            onClick = {
+                                moreMenuOpen = false
+                                isLocked = !isLocked
+                                performSave()
+                                Toast.makeText(context, if (isLocked) "Note locked" else "Note unlocked", Toast.LENGTH_SHORT).show()
+                            },
+                            leadingIcon = {
+                                Icon(if (isLocked) Icons.Default.LockOpen else Icons.Default.Lock, contentDescription = null, tint = glass.secondaryAccent)
+                            }
+                        )
 
-                            IconButton(
+                        DropdownMenuItem(
+                            text = { Text("Import Document / Font", color = glass.textPrimary) },
+                            onClick = {
+                                moreMenuOpen = false
+                                filePickerLauncher.launch("*/*")
+                            },
+                            leadingIcon = {
+                                Icon(Icons.Default.AttachFile, contentDescription = null, tint = glass.secondaryAccent)
+                            }
+                        )
+
+                        DropdownMenuItem(
+                            text = { Text("Export Note (PDF, CSV, TXT, JSON)", color = glass.textPrimary) },
+                            onClick = {
+                                moreMenuOpen = false
+                                showExportSheet = true
+                            },
+                            leadingIcon = {
+                                Icon(Icons.Default.Share, contentDescription = null, tint = glass.primaryAccent)
+                            }
+                        )
+
+                        if (currentNoteId > 0L) {
+                            DropdownMenuItem(
+                                text = { Text("Move to Trash", color = Color(0xFFEF4444)) },
                                 onClick = {
-                                    imageUri = null
-                                    performSave()
+                                    moreMenuOpen = false
+                                    viewModel.moveToTrash(currentNoteId)
+                                    handleBack()
                                 },
-                                modifier = Modifier
-                                    .align(Alignment.TopEnd)
-                                    .padding(8.dp)
-                                    .size(32.dp)
-                                    .clip(CircleShape)
-                                    .background(Color(0x99000000))
-                            ) {
-                                Icon(
-                                    imageVector = Icons.Default.Clear,
-                                    contentDescription = "Remove image",
-                                    tint = Color.White,
-                                    modifier = Modifier.size(18.dp)
-                                )
-                            }
-                        }
-                        Spacer(modifier = Modifier.height(14.dp))
-                    }
-                }
-
-                // Attached Document File Tag (if imported)
-                if (attachedDocName != null) {
-                    item {
-                        Row(
-                            modifier = Modifier
-                                .clip(RoundedCornerShape(12.dp))
-                                .background(glass.cardBackgroundElevated)
-                                .border(1.dp, glass.cardBorder, RoundedCornerShape(12.dp))
-                                .padding(horizontal = 12.dp, vertical = 6.dp),
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Icon(
-                                imageVector = Icons.AutoMirrored.Filled.InsertDriveFile,
-                                contentDescription = null,
-                                tint = MercuryViolet,
-                                modifier = Modifier.size(16.dp)
-                            )
-                            Spacer(modifier = Modifier.width(6.dp))
-                            Text(
-                                text = attachedDocName ?: "File",
-                                style = MaterialTheme.typography.bodySmall,
-                                color = glass.textPrimary
+                                leadingIcon = {
+                                    Icon(Icons.Default.Delete, contentDescription = null, tint = Color(0xFFEF4444))
+                                }
                             )
                         }
-                        Spacer(modifier = Modifier.height(10.dp))
                     }
                 }
 
-                // Date, Word Count & Status Meta Info
-                item {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Text(
-                            text = formattedDate,
-                            style = MaterialTheme.typography.labelSmall,
-                            color = glass.textMuted
-                        )
-                        Text(
-                            text = "$wordCount words • ${contentValue.text.length} chars",
-                            style = MaterialTheme.typography.labelSmall,
-                            color = glass.textMuted
-                        )
-                    }
-                    Spacer(modifier = Modifier.height(8.dp))
-                }
-
-                // Note Title
-                item {
-                    BasicTextField(
-                        value = title,
-                        onValueChange = { title = it },
+                // Color Palette Selector Row (if toggled)
+                AnimatedVisibility(visible = colorPickerOpen) {
+                    LazyRow(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .testTag("note_title_input"),
-                        textStyle = TextStyle(
-                            color = glass.textPrimary,
-                            fontSize = titleFontSize,
-                            fontWeight = FontWeight.Bold
-                        ),
-                        cursorBrush = SolidColor(glass.primaryAccent),
-                        decorationBox = { innerTextField ->
-                            if (title.isEmpty()) {
-                                Text(
-                                    text = "Title",
-                                    color = glass.textMuted,
-                                    fontSize = titleFontSize,
-                                    fontWeight = FontWeight.Bold
-                                )
-                            }
-                            innerTextField()
-                        }
-                    )
-                    Spacer(modifier = Modifier.height(14.dp))
-                }
+                            .padding(horizontal = if (isCompact) 12.dp else 20.dp, vertical = 6.dp),
+                        horizontalArrangement = Arrangement.spacedBy(10.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        items(NoteTintOptions) { (colorVal, pair) ->
+                            val (_, displayColor) = pair
+                            val isSelected = colorTag == colorVal
 
-                // Checklist Items (if in checklist mode)
-                if (isChecklistMode || checklistItems.isNotEmpty()) {
-                    items(checklistItems, key = { it.id }) { item ->
-                        InteractiveChecklistRow(
-                            text = item.text,
-                            isChecked = item.isChecked,
-                            onCheckedChange = { checked ->
-                                val index = checklistItems.indexOfFirst { it.id == item.id }
-                                if (index != -1) {
-                                    checklistItems[index] = item.copy(isChecked = checked)
-                                    performSave()
-                                }
-                            },
-                            onDelete = {
-                                checklistItems.remove(item)
-                                performSave()
-                            }
-                        )
-                    }
-
-                    // Add new checklist item input
-                    item {
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(vertical = 4.dp),
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Icon(
-                                imageVector = Icons.Default.Add,
-                                contentDescription = "Add item",
-                                tint = MercuryViolet,
-                                modifier = Modifier.size(20.dp)
-                            )
-                            Spacer(modifier = Modifier.width(8.dp))
-                            BasicTextField(
-                                value = newChecklistText,
-                                onValueChange = { newChecklistText = it },
-                                modifier = Modifier.weight(1f),
-                                textStyle = TextStyle(
-                                    color = glass.textPrimary,
-                                    fontSize = baseFontSize
-                                ),
-                                cursorBrush = SolidColor(glass.primaryAccent),
-                                singleLine = true,
-                                decorationBox = { innerTextField ->
-                                    if (newChecklistText.isEmpty()) {
-                                        Text(
-                                            text = "Add checklist item...",
-                                            color = glass.textMuted,
-                                            fontSize = baseFontSize
-                                        )
-                                    }
-                                    innerTextField()
-                                }
-                            )
-                            if (newChecklistText.isNotBlank()) {
-                                IconButton(
-                                    onClick = {
-                                        checklistItems.add(ChecklistItem(text = newChecklistText.trim()))
-                                        newChecklistText = ""
+                            Box(
+                                modifier = Modifier
+                                    .size(34.dp)
+                                    .clip(CircleShape)
+                                    .background(if (colorVal == 0L) glass.cardBackgroundElevated else displayColor)
+                                    .border(
+                                        width = if (isSelected) 2.5.dp else 1.dp,
+                                        color = if (isSelected) glass.primaryAccent else glass.cardBorder,
+                                        shape = CircleShape
+                                    )
+                                    .clickable {
+                                        colorTag = colorVal
                                         performSave()
                                     },
-                                    modifier = Modifier.size(28.dp)
+                                contentAlignment = Alignment.Center
+                            ) {
+                                if (colorVal == 0L) {
+                                    Text("∅", color = glass.textSecondary, fontSize = 14.sp)
+                                }
+                            }
+                        }
+                    }
+                }
+
+                // Main Editor Scrollable Content
+                LazyColumn(
+                    modifier = Modifier
+                        .weight(1f)
+                        .fillMaxWidth(),
+                    contentPadding = PaddingValues(horizontal = if (isCompact) 12.dp else 20.dp, vertical = 8.dp)
+                ) {
+                    // Attached Image (if any)
+                    if (!imageUri.isNullOrBlank()) {
+                        item {
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .height(if (isCompact) 180.dp else 220.dp)
+                                    .clip(RoundedCornerShape(18.dp))
+                                    .border(1.dp, glass.cardBorder, RoundedCornerShape(18.dp))
+                            ) {
+                                AsyncImage(
+                                    model = imageUri,
+                                    contentDescription = "Attached image",
+                                    modifier = Modifier.fillMaxSize(),
+                                    contentScale = ContentScale.Crop
+                                )
+
+                                IconButton(
+                                    onClick = {
+                                        imageUri = null
+                                        performSave()
+                                    },
+                                    modifier = Modifier
+                                        .align(Alignment.TopEnd)
+                                        .padding(8.dp)
+                                        .size(32.dp)
+                                        .clip(CircleShape)
+                                        .background(Color(0x99000000))
                                 ) {
                                     Icon(
-                                        imageVector = Icons.Default.Add,
-                                        contentDescription = "Save item",
-                                        tint = MercuryViolet
+                                        imageVector = Icons.Default.Clear,
+                                        contentDescription = "Remove image",
+                                        tint = Color.White,
+                                        modifier = Modifier.size(18.dp)
                                     )
                                 }
                             }
+                            Spacer(modifier = Modifier.height(14.dp))
                         }
-                        Spacer(modifier = Modifier.height(14.dp))
                     }
-                }
 
-                // Note Body Text Field
-                item {
-                    BasicTextField(
-                        value = contentValue,
-                        onValueChange = { contentValue = it },
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .height(if (contentValue.text.length < 200) 280.dp else 600.dp)
-                            .testTag("note_content_input"),
-                        textStyle = TextStyle(
-                            color = glass.textPrimary,
-                            fontSize = baseFontSize,
-                            lineHeight = (baseFontSize.value * 1.55f).sp
-                        ),
-                        cursorBrush = SolidColor(glass.primaryAccent),
-                        decorationBox = { innerTextField ->
-                            if (contentValue.text.isEmpty() && checklistItems.isEmpty()) {
+                    // Attached Document File Tag (if imported)
+                    if (attachedDocName != null) {
+                        item {
+                            Row(
+                                modifier = Modifier
+                                    .clip(RoundedCornerShape(12.dp))
+                                    .background(glass.cardBackgroundElevated)
+                                    .border(1.dp, glass.cardBorder, RoundedCornerShape(12.dp))
+                                    .padding(horizontal = 12.dp, vertical = 6.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Icon(
+                                    imageVector = Icons.AutoMirrored.Filled.InsertDriveFile,
+                                    contentDescription = null,
+                                    tint = glass.primaryAccent,
+                                    modifier = Modifier.size(16.dp)
+                                )
+                                Spacer(modifier = Modifier.width(6.dp))
                                 Text(
-                                    text = "Start writing your notes, thoughts, or voice dictations here...",
-                                    color = glass.textMuted,
-                                    fontSize = baseFontSize
+                                    text = attachedDocName ?: "File",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = glass.textPrimary
                                 )
                             }
-                            innerTextField()
+                            Spacer(modifier = Modifier.height(10.dp))
                         }
-                    )
-                }
-            }
+                    }
 
-            // Floating Frosted Formatting Toolbar (Fully responsive with Voice typing, File Import, Lists, Formatting)
-            FloatingFormattingToolbar(
-                isListening = isVoiceListening,
-                onBold = {
-                    val text = contentValue.text
-                    val sel = contentValue.selection
-                    val newText = if (sel.collapsed) {
-                        text.substring(0, sel.start) + "**Bold**" + text.substring(sel.end)
-                    } else {
-                        text.substring(0, sel.start) + "**" + text.substring(sel.start, sel.end) + "**" + text.substring(sel.end)
+                    // Date, Word Count & Status Meta Info
+                    item {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text(
+                                text = formattedDate,
+                                style = MaterialTheme.typography.labelSmall,
+                                color = glass.textMuted
+                            )
+                            Text(
+                                text = "$wordCount words • ${contentValue.text.length} chars",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = glass.textMuted
+                            )
+                        }
+                        Spacer(modifier = Modifier.height(8.dp))
                     }
-                    contentValue = TextFieldValue(newText, TextRange(sel.start + 2))
-                },
-                onItalic = {
-                    val text = contentValue.text
-                    val sel = contentValue.selection
-                    val newText = if (sel.collapsed) {
-                        text.substring(0, sel.start) + "*Italic*" + text.substring(sel.end)
-                    } else {
-                        text.substring(0, sel.start) + "*" + text.substring(sel.start, sel.end) + "*" + text.substring(sel.end)
+
+                    // Note Title
+                    item {
+                        BasicTextField(
+                            value = title,
+                            onValueChange = { title = it },
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .testTag("note_title_input"),
+                            textStyle = TextStyle(
+                                color = glass.textPrimary,
+                                fontSize = titleFontSize,
+                                fontWeight = FontWeight.Bold
+                            ),
+                            cursorBrush = SolidColor(glass.primaryAccent),
+                            decorationBox = { innerTextField ->
+                                if (title.isEmpty()) {
+                                    Text(
+                                        text = "Title",
+                                        color = glass.textMuted,
+                                        fontSize = titleFontSize,
+                                        fontWeight = FontWeight.Bold
+                                    )
+                                }
+                                innerTextField()
+                            }
+                        )
+                        Spacer(modifier = Modifier.height(14.dp))
                     }
-                    contentValue = TextFieldValue(newText, TextRange(sel.start + 1))
-                },
-                onUnderline = {
-                    val text = contentValue.text
-                    val sel = contentValue.selection
-                    val newText = if (sel.collapsed) {
-                        text.substring(0, sel.start) + "<u>Underline</u>" + text.substring(sel.end)
-                    } else {
-                        text.substring(0, sel.start) + "<u>" + text.substring(sel.start, sel.end) + "</u>" + text.substring(sel.end)
+
+                    // Checklist Items (if in checklist mode)
+                    if (isChecklistMode || checklistItems.isNotEmpty()) {
+                        items(checklistItems, key = { it.id }) { item ->
+                            InteractiveChecklistRow(
+                                text = item.text,
+                                isChecked = item.isChecked,
+                                onCheckedChange = { checked ->
+                                    val index = checklistItems.indexOfFirst { it.id == item.id }
+                                    if (index != -1) {
+                                        checklistItems[index] = item.copy(isChecked = checked)
+                                        performSave()
+                                    }
+                                },
+                                onDelete = {
+                                    checklistItems.remove(item)
+                                    performSave()
+                                }
+                            )
+                        }
+
+                        // Add new checklist item input
+                        item {
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(vertical = 4.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.Add,
+                                    contentDescription = "Add item",
+                                    tint = glass.primaryAccent,
+                                    modifier = Modifier.size(20.dp)
+                                )
+                                Spacer(modifier = Modifier.width(8.dp))
+                                BasicTextField(
+                                    value = newChecklistText,
+                                    onValueChange = { newChecklistText = it },
+                                    modifier = Modifier.weight(1f),
+                                    textStyle = TextStyle(
+                                        color = glass.textPrimary,
+                                        fontSize = baseFontSize
+                                    ),
+                                    cursorBrush = SolidColor(glass.primaryAccent),
+                                    singleLine = true,
+                                    decorationBox = { innerTextField ->
+                                        if (newChecklistText.isEmpty()) {
+                                            Text(
+                                                text = "Add checklist item...",
+                                                color = glass.textMuted,
+                                                fontSize = baseFontSize
+                                            )
+                                        }
+                                        innerTextField()
+                                    }
+                                )
+                                if (newChecklistText.isNotBlank()) {
+                                    IconButton(
+                                        onClick = {
+                                            checklistItems.add(ChecklistItem(text = newChecklistText.trim()))
+                                            newChecklistText = ""
+                                            performSave()
+                                        },
+                                        modifier = Modifier.size(28.dp)
+                                    ) {
+                                        Icon(
+                                            imageVector = Icons.Default.Add,
+                                            contentDescription = "Save item",
+                                            tint = glass.primaryAccent
+                                        )
+                                    }
+                                }
+                            }
+                            Spacer(modifier = Modifier.height(14.dp))
+                        }
                     }
-                    contentValue = TextFieldValue(newText, TextRange(sel.start + 3))
-                },
-                onBulletList = {
-                    val text = contentValue.text
-                    val sel = contentValue.selection
-                    val insert = "\n• "
-                    contentValue = TextFieldValue(
-                        text.substring(0, sel.start) + insert + text.substring(sel.end),
-                        TextRange(sel.start + insert.length)
-                    )
-                },
-                onNumberedList = {
-                    val text = contentValue.text
-                    val sel = contentValue.selection
-                    val insert = "\n1. "
-                    contentValue = TextFieldValue(
-                        text.substring(0, sel.start) + insert + text.substring(sel.end),
-                        TextRange(sel.start + insert.length)
-                    )
-                },
-                onToggleChecklist = {
-                    isChecklistMode = !isChecklistMode
-                    if (isChecklistMode && checklistItems.isEmpty()) {
-                        checklistItems.add(ChecklistItem(text = "First task"))
+
+                    // Note Body Text Field
+                    item {
+                        BasicTextField(
+                            value = contentValue,
+                            onValueChange = { contentValue = it },
+                            visualTransformation = remember(glass.primaryAccent, glass.secondaryAccent) {
+                                MarkdownVisualTransformation(glass.primaryAccent, glass.secondaryAccent)
+                            },
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(if (contentValue.text.length < 200) 280.dp else 600.dp)
+                                .testTag("note_content_input"),
+                            textStyle = TextStyle(
+                                color = glass.textPrimary,
+                                fontSize = baseFontSize,
+                                lineHeight = (baseFontSize.value * 1.55f).sp
+                            ),
+                            cursorBrush = SolidColor(glass.primaryAccent),
+                            decorationBox = { innerTextField ->
+                                if (contentValue.text.isEmpty() && checklistItems.isEmpty()) {
+                                    Text(
+                                        text = "Start writing your notes, thoughts, or voice dictations here...",
+                                        color = glass.textMuted,
+                                        fontSize = baseFontSize
+                                    )
+                                }
+                                innerTextField()
+                            }
+                        )
                     }
-                },
-                onAttachImage = {
-                    imagePickerLauncher.launch("image/*")
-                },
-                onAttachFile = {
-                    filePickerLauncher.launch("*/*")
-                },
-                onVoiceTyping = {
-                    triggerVoiceTyping()
-                },
-                onToggleColorPicker = {
-                    colorPickerOpen = !colorPickerOpen
                 }
-            )
+
+                // Floating Frosted Formatting Toolbar (Fully responsive with Voice typing, File Import, Lists, Formatting)
+                FloatingFormattingToolbar(
+                    isListening = isVoiceListening,
+                    onBold = {
+                        applyFormatting("**", "**", "bold text")
+                    },
+                    onItalic = {
+                        applyFormatting("*", "*", "italic text")
+                    },
+                    onUnderline = {
+                        applyFormatting("<u>", "</u>", "underlined text")
+                    },
+                    onBulletList = {
+                        insertLinePrefix("• ")
+                    },
+                    onNumberedList = {
+                        insertLinePrefix("1. ")
+                    },
+                    onToggleChecklist = {
+                        isChecklistMode = !isChecklistMode
+                        if (isChecklistMode && checklistItems.isEmpty()) {
+                            checklistItems.add(ChecklistItem(text = ""))
+                        }
+                        Toast.makeText(
+                            context,
+                            if (isChecklistMode) "Checklist active" else "Checklist hidden",
+                            Toast.LENGTH_SHORT
+                        ).show()
+                    },
+                    onAttachImage = {
+                        imagePickerLauncher.launch("image/*")
+                    },
+                    onAttachFile = {
+                        filePickerLauncher.launch("*/*")
+                    },
+                    onVoiceTyping = {
+                        triggerVoiceTyping()
+                    },
+                    onToggleColorPicker = {
+                        colorPickerOpen = !colorPickerOpen
+                    }
+                )
+            }
         }
 
         // Export Modal Bottom Sheet
@@ -859,7 +931,7 @@ fun EditorScreen(
                         title = "Plain Text",
                         subtitle = "Universal clean text file (.txt)",
                         icon = Icons.Default.TextFields,
-                        iconTint = MercuryViolet
+                        iconTint = MercuryTheme.glass.primaryAccent
                     ) {
                         showExportSheet = false
                         NotesExporter.exportAndShare(context, exportNoteEntity, ExportFormat.TXT, checklistItems)
@@ -1041,7 +1113,7 @@ fun EditorTopBar(
                 Icon(
                     imageVector = Icons.Default.Mic,
                     contentDescription = "Voice Dictate",
-                    tint = MercuryViolet,
+                    tint = glass.primaryAccent,
                     modifier = Modifier
                         .size(18.dp)
                         .align(Alignment.Center)
@@ -1075,7 +1147,7 @@ fun EditorTopBar(
                 Icon(
                     imageVector = if (isFavorite) Icons.Default.Favorite else Icons.Default.FavoriteBorder,
                     contentDescription = "Favorite",
-                    tint = if (isFavorite) MercuryPink else glass.textSecondary,
+                    tint = if (isFavorite) glass.secondaryAccent else glass.textSecondary,
                     modifier = Modifier
                         .size(17.dp)
                         .align(Alignment.Center)
@@ -1130,15 +1202,13 @@ fun FloatingFormattingToolbar(
         label = "mic_scale"
     )
 
-    GlassCard(
+    MoltenGlassCard(
         modifier = Modifier
             .fillMaxWidth()
             .padding(horizontal = if (isCompact) 8.dp else 14.dp, vertical = 6.dp)
             .height(52.dp),
         shape = RoundedCornerShape(26.dp),
-        backgroundColor = glass.bottomNavBackground,
-        borderColor = if (isListening) MercuryPink else glass.bottomNavBorder,
-        borderWidth = if (isListening) 2.dp else 1.dp
+        backgroundColor = glass.bottomNavBackground
     ) {
         Row(
             modifier = Modifier
@@ -1155,12 +1225,12 @@ fun FloatingFormattingToolbar(
                     .size(36.dp)
                     .scale(micScale)
                     .clip(CircleShape)
-                    .background(if (isListening) MercuryPink.copy(alpha = 0.25f) else Color.Transparent)
+                    .background(if (isListening) glass.secondaryAccent.copy(alpha = 0.25f) else Color.Transparent)
             ) {
                 Icon(
                     imageVector = if (isListening) Icons.Default.MicOff else Icons.Default.Mic,
                     contentDescription = "Voice Dictate",
-                    tint = if (isListening) MercuryPink else MercuryViolet,
+                    tint = if (isListening) glass.secondaryAccent else glass.primaryAccent,
                     modifier = Modifier.size(20.dp)
                 )
             }
@@ -1181,17 +1251,89 @@ fun FloatingFormattingToolbar(
                 Icon(Icons.Default.FormatListNumbered, contentDescription = "Numbered list", tint = glass.textPrimary, modifier = Modifier.size(19.dp))
             }
             IconButton(onClick = onToggleChecklist, modifier = Modifier.size(36.dp)) {
-                Icon(Icons.Default.Checklist, contentDescription = "Checklist", tint = MercuryViolet, modifier = Modifier.size(20.dp))
+                Icon(Icons.Default.Checklist, contentDescription = "Checklist", tint = glass.primaryAccent, modifier = Modifier.size(20.dp))
             }
             IconButton(onClick = onAttachImage, modifier = Modifier.size(36.dp)) {
                 Icon(Icons.Default.Image, contentDescription = "Attach image", tint = glass.textPrimary, modifier = Modifier.size(19.dp))
             }
             IconButton(onClick = onAttachFile, modifier = Modifier.size(36.dp)) {
-                Icon(Icons.Default.AttachFile, contentDescription = "Attach File/Doc/Font", tint = MercuryTheme.glass.secondaryAccent, modifier = Modifier.size(19.dp))
+                Icon(Icons.Default.AttachFile, contentDescription = "Attach File/Doc/Font", tint = glass.secondaryAccent, modifier = Modifier.size(19.dp))
             }
             IconButton(onClick = onToggleColorPicker, modifier = Modifier.size(36.dp)) {
-                Icon(Icons.Default.ColorLens, contentDescription = "Color tint", tint = MercuryPink, modifier = Modifier.size(19.dp))
+                Icon(Icons.Default.ColorLens, contentDescription = "Color tint", tint = glass.secondaryAccent, modifier = Modifier.size(19.dp))
             }
         }
+    }
+}
+
+class MarkdownVisualTransformation(
+    private val primaryColor: Color,
+    private val secondaryColor: Color
+) : VisualTransformation {
+    override fun filter(text: AnnotatedString): TransformedText {
+        val raw = text.text
+        val builder = AnnotatedString.Builder(raw)
+
+        // Bold: **text**
+        val boldRegex = Regex("""\*\*(.*?)\*\*""")
+        boldRegex.findAll(raw).forEach { match ->
+            builder.addStyle(
+                SpanStyle(fontWeight = FontWeight.Bold, color = primaryColor),
+                match.range.first,
+                match.range.last + 1
+            )
+        }
+
+        // Italic: *text* (excluding **)
+        val italicRegex = Regex("""(?<!\*)\*([^*]+)\*(?!\*)""")
+        italicRegex.findAll(raw).forEach { match ->
+            builder.addStyle(
+                SpanStyle(fontStyle = FontStyle.Italic, color = secondaryColor),
+                match.range.first,
+                match.range.last + 1
+            )
+        }
+
+        // Underline: <u>text</u>
+        val underlineRegex = Regex("""<u>(.*?)</u>""", RegexOption.IGNORE_CASE)
+        underlineRegex.findAll(raw).forEach { match ->
+            builder.addStyle(
+                SpanStyle(textDecoration = TextDecoration.Underline, color = primaryColor),
+                match.range.first,
+                match.range.last + 1
+            )
+        }
+
+        // Strikethrough: ~~text~~
+        val strikeRegex = Regex("""~~(.*?)~~""")
+        strikeRegex.findAll(raw).forEach { match ->
+            builder.addStyle(
+                SpanStyle(textDecoration = TextDecoration.LineThrough),
+                match.range.first,
+                match.range.last + 1
+            )
+        }
+
+        // Bullets: • or -
+        val bulletRegex = Regex("""(?m)^[•\-]\s+(.*)$""")
+        bulletRegex.findAll(raw).forEach { match ->
+            builder.addStyle(
+                SpanStyle(fontWeight = FontWeight.Bold, color = primaryColor),
+                match.range.first,
+                (match.range.first + 2).coerceAtMost(raw.length)
+            )
+        }
+
+        // Numbered: 1. or 2.
+        val numberedRegex = Regex("""(?m)^\d+\.\s+(.*)$""")
+        numberedRegex.findAll(raw).forEach { match ->
+            builder.addStyle(
+                SpanStyle(fontWeight = FontWeight.Bold, color = primaryColor),
+                match.range.first,
+                (match.range.first + 3).coerceAtMost(raw.length)
+            )
+        }
+
+        return TransformedText(builder.toAnnotatedString(), OffsetMapping.Identity)
     }
 }

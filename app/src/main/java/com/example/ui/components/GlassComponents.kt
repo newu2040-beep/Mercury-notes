@@ -2,8 +2,15 @@ package com.example.ui.components
 
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.LinearEasing
+import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.spring
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -45,6 +52,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.draw.shadow
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
@@ -58,11 +66,86 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.example.ui.theme.MercuryBlue
-import com.example.ui.theme.MercuryPink
-import com.example.ui.theme.MercuryPrimaryGradient
+import androidx.compose.ui.draw.drawWithContent
+import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.layout.fillMaxSize
+import com.example.data.preferences.TranslucencyLevel
 import com.example.ui.theme.MercuryTheme
-import com.example.ui.theme.MercuryViolet
+
+/**
+ * TranslucentBackdropCanvas: Floating ambient aurora light blobs that drift smoothly behind
+ * the UI to provide deep frosted refraction and vibrant visual bleed through translucent cards.
+ */
+@Composable
+fun TranslucentBackdropCanvas(
+    modifier: Modifier = Modifier,
+    enabled: Boolean = true,
+    animate: Boolean = true
+) {
+    val glass = MercuryTheme.glass
+    if (!enabled || glass.translucencyLevel == TranslucencyLevel.OPAQUE) {
+        return
+    }
+
+    val colors = glass.auraBlobColors
+    val infiniteTransition = rememberInfiniteTransition(label = "aura_ambient")
+    val phase by infiniteTransition.animateFloat(
+        initialValue = 0f,
+        targetValue = if (animate) 6.28318f else 0f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(durationMillis = 14000, easing = LinearEasing),
+            repeatMode = RepeatMode.Restart
+        ),
+        label = "aura_phase"
+    )
+
+    Canvas(modifier = modifier.fillMaxSize()) {
+        val width = size.width
+        val height = size.height
+
+        if (colors.isNotEmpty()) {
+            val offsetX1 = kotlin.math.sin(phase.toDouble()).toFloat() * (width * 0.15f)
+            val offsetY1 = kotlin.math.cos(phase.toDouble()).toFloat() * (height * 0.08f)
+            drawCircle(
+                brush = Brush.radialGradient(
+                    colors = listOf(colors[0], Color.Transparent),
+                    center = Offset(width * 0.25f + offsetX1, height * 0.22f + offsetY1),
+                    radius = width * 0.55f
+                ),
+                radius = width * 0.55f,
+                center = Offset(width * 0.25f + offsetX1, height * 0.22f + offsetY1)
+            )
+
+            if (colors.size > 1) {
+                val offsetX2 = kotlin.math.cos((phase + 1.5f).toDouble()).toFloat() * (width * 0.18f)
+                val offsetY2 = kotlin.math.sin((phase + 1.5f).toDouble()).toFloat() * (height * 0.10f)
+                drawCircle(
+                    brush = Brush.radialGradient(
+                        colors = listOf(colors[1], Color.Transparent),
+                        center = Offset(width * 0.75f + offsetX2, height * 0.60f + offsetY2),
+                        radius = width * 0.60f
+                    ),
+                    radius = width * 0.60f,
+                    center = Offset(width * 0.75f + offsetX2, height * 0.60f + offsetY2)
+                )
+            }
+
+            if (colors.size > 2) {
+                val offsetX3 = kotlin.math.sin((phase * 0.7f).toDouble()).toFloat() * (width * 0.12f)
+                val offsetY3 = kotlin.math.cos((phase * 0.7f).toDouble()).toFloat() * (height * 0.06f)
+                drawCircle(
+                    brush = Brush.radialGradient(
+                        colors = listOf(colors[2].copy(alpha = colors[2].alpha * 0.8f), Color.Transparent),
+                        center = Offset(width * 0.50f + offsetX3, height * 0.88f + offsetY3),
+                        radius = width * 0.50f
+                    ),
+                    radius = width * 0.50f,
+                    center = Offset(width * 0.50f + offsetX3, height * 0.88f + offsetY3)
+                )
+            }
+        }
+    }
+}
 
 @Composable
 fun GlassCard(
@@ -94,6 +177,22 @@ fun GlassCard(
         .then(if (elevation > 0.dp) Modifier.shadow(elevation, shape) else Modifier)
         .clip(shape)
         .background(backgroundColor)
+        .drawWithContent {
+            drawContent()
+            // Translucent specular top reflection highlight
+            if (glass.translucencyLevel != TranslucencyLevel.OPAQUE) {
+                drawRect(
+                    brush = Brush.verticalGradient(
+                        colors = listOf(
+                            if (glass.isDark) Color(0x22FFFFFF) else Color(0x60FFFFFF),
+                            Color.Transparent
+                        ),
+                        startY = 0f,
+                        endY = 24.dp.toPx()
+                    )
+                )
+            }
+        }
         .border(borderWidth, borderBrush, shape)
         .then(
             if (onClick != null) {
@@ -111,6 +210,164 @@ fun GlassCard(
     )
 }
 
+/**
+ * MoltenGlassPanel: Ultra-modern liquid glassmorphic panel with dynamic iridescent specular reflections,
+ * deep frosted transparency, and molten metallic border sheen.
+ */
+@Composable
+fun MoltenGlassPanel(
+    modifier: Modifier = Modifier,
+    shape: RoundedCornerShape = RoundedCornerShape(24.dp),
+    elevation: Dp = 6.dp,
+    onClick: (() -> Unit)? = null,
+    content: @Composable BoxScope.() -> Unit
+) {
+    val glass = MercuryTheme.glass
+    val isLiquid = glass.isLiquidGlass
+
+    val infiniteTransition = rememberInfiniteTransition(label = "molten_sheen")
+    val shimmerOffset by infiniteTransition.animateFloat(
+        initialValue = 0f,
+        targetValue = 1000f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(durationMillis = 6000, easing = LinearEasing),
+            repeatMode = RepeatMode.Restart
+        ),
+        label = "shimmer_offset"
+    )
+
+    val moltenBorderBrush = Brush.linearGradient(
+        colors = listOf(
+            glass.primaryAccent.copy(alpha = if (glass.isDark) 0.55f else 0.35f),
+            glass.secondaryAccent.copy(alpha = if (glass.isDark) 0.40f else 0.25f),
+            glass.tertiaryAccent.copy(alpha = if (glass.isDark) 0.25f else 0.15f),
+            glass.cardBorder
+        ),
+        start = Offset(shimmerOffset % 500f, 0f),
+        end = Offset((shimmerOffset % 500f) + 400f, 600f)
+    )
+
+    val panelBackground = if (glass.isDark) {
+        Brush.verticalGradient(
+            colors = listOf(
+                glass.cardBackgroundElevated,
+                glass.cardBackground
+            )
+        )
+    } else {
+        Brush.verticalGradient(
+            colors = listOf(
+                glass.cardBackgroundElevated,
+                glass.cardBackground
+            )
+        )
+    }
+
+    Box(
+        modifier = modifier
+            .shadow(
+                elevation = elevation,
+                shape = shape,
+                ambientColor = glass.primaryAccent.copy(alpha = 0.2f),
+                spotColor = glass.primaryAccent.copy(alpha = 0.3f)
+            )
+            .clip(shape)
+            .background(panelBackground)
+            .drawWithContent {
+                drawContent()
+                if (glass.translucencyLevel != TranslucencyLevel.OPAQUE) {
+                    drawRect(
+                        brush = Brush.verticalGradient(
+                            colors = listOf(
+                                if (glass.isDark) Color(0x35FFFFFF) else Color(0x80FFFFFF),
+                                Color.Transparent
+                            ),
+                            startY = 0f,
+                            endY = 32.dp.toPx()
+                        )
+                    )
+                }
+            }
+            .border(
+                width = if (isLiquid) 1.5.dp else 1.dp,
+                brush = moltenBorderBrush,
+                shape = shape
+            )
+            .then(
+                if (onClick != null) {
+                    Modifier.clickable(
+                        interactionSource = remember { MutableInteractionSource() },
+                        indication = null,
+                        onClick = onClick
+                    )
+                } else Modifier
+            ),
+        content = content
+    )
+}
+
+/**
+ * MoltenGlassCard: Compact card variant of molten glass panel with subtle specular highlights
+ */
+@Composable
+fun MoltenGlassCard(
+    modifier: Modifier = Modifier,
+    shape: RoundedCornerShape = RoundedCornerShape(20.dp),
+    backgroundColor: Color? = null,
+    borderColor: Color? = null,
+    borderWidth: Dp = 1.2.dp,
+    elevation: Dp = 2.dp,
+    onClick: (() -> Unit)? = null,
+    content: @Composable BoxScope.() -> Unit
+) {
+    val glass = MercuryTheme.glass
+
+    val borderBrush = if (borderColor != null) {
+        SolidColor(borderColor)
+    } else {
+        Brush.linearGradient(
+            colors = listOf(
+                glass.primaryAccent.copy(alpha = if (glass.isDark) 0.45f else 0.30f),
+                glass.secondaryAccent.copy(alpha = if (glass.isDark) 0.30f else 0.20f),
+                glass.cardBorder
+            )
+        )
+    }
+
+    Box(
+        modifier = modifier
+            .then(if (elevation > 0.dp) Modifier.shadow(elevation, shape) else Modifier)
+            .clip(shape)
+            .background(backgroundColor ?: glass.cardBackground)
+            .drawWithContent {
+                drawContent()
+                if (glass.translucencyLevel != TranslucencyLevel.OPAQUE) {
+                    drawRect(
+                        brush = Brush.verticalGradient(
+                            colors = listOf(
+                                if (glass.isDark) Color(0x28FFFFFF) else Color(0x65FFFFFF),
+                                Color.Transparent
+                            ),
+                            startY = 0f,
+                            endY = 20.dp.toPx()
+                        )
+                    )
+                }
+            }
+            .border(borderWidth, borderBrush, shape)
+            .then(
+                if (onClick != null) {
+                    Modifier.clickable(
+                        interactionSource = remember { MutableInteractionSource() },
+                        indication = null,
+                        onClick = onClick
+                    )
+                } else Modifier
+            ),
+        content = content
+    )
+}
+
 @Composable
 fun GlowingGradientButton(
     text: String,
@@ -119,7 +376,8 @@ fun GlowingGradientButton(
     modifier: Modifier = Modifier,
     testTag: String = "new_note_button"
 ) {
-    val glowColor = MercuryTheme.glass.glowColor
+    val glass = MercuryTheme.glass
+    val glowColor = glass.glowColor
     val isCompact = MercuryTheme.isCompact
 
     Box(
@@ -134,7 +392,7 @@ fun GlowingGradientButton(
                 )
             }
             .clip(RoundedCornerShape(30.dp))
-            .background(MercuryPrimaryGradient)
+            .background(glass.buttonGradient)
             .clickable(onClick = onClick)
             .padding(
                 horizontal = if (isCompact) 14.dp else 20.dp,
@@ -260,7 +518,7 @@ fun FilterChipPill(
     val glass = MercuryTheme.glass
 
     val bgModifier = if (isSelected) {
-        Modifier.background(MercuryPrimaryGradient)
+        Modifier.background(glass.buttonGradient)
     } else {
         Modifier.background(glass.cardBackground)
     }
@@ -339,11 +597,11 @@ fun SegmentedThemeControl(
             options.forEachIndexed { index, title ->
                 val isSelected = selectedOption == index
                 val itemBg = if (isSelected) {
-                    if (glass.isDark) Color(0xFF2A3756) else Color.White
+                    if (glass.isDark) glass.cardBackgroundElevated else Color.White
                 } else Color.Transparent
 
                 val itemTextColor = if (isSelected) {
-                    if (glass.isDark) Color.White else MercuryViolet
+                    if (glass.isDark) Color.White else glass.primaryAccent
                 } else glass.textSecondary
 
                 Box(
@@ -357,7 +615,7 @@ fun SegmentedThemeControl(
                                 Modifier.border(
                                     BorderStroke(
                                         1.dp,
-                                        if (glass.isDark) Color(0x33FFFFFF) else Color(0x22000000)
+                                        if (glass.isDark) Color(0x33FFFFFF) else glass.primaryAccent.copy(alpha = 0.25f)
                                     ),
                                     RoundedCornerShape(20.dp)
                                 )
@@ -401,12 +659,12 @@ fun InteractiveChecklistRow(
                 .size(24.dp)
                 .clip(RoundedCornerShape(6.dp))
                 .background(
-                    if (isChecked) MercuryViolet else Color.Transparent
+                    if (isChecked) glass.primaryAccent else Color.Transparent
                 )
                 .border(
                     BorderStroke(
                         1.5.dp,
-                        if (isChecked) MercuryViolet else glass.textMuted
+                        if (isChecked) glass.primaryAccent else glass.textMuted
                     ),
                     RoundedCornerShape(6.dp)
                 )

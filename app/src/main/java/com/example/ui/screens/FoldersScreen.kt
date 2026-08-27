@@ -125,7 +125,7 @@ fun FoldersScreen(
                         Icon(
                             imageVector = Icons.Default.CreateNewFolder,
                             contentDescription = "New Folder",
-                            tint = MercuryViolet,
+                            tint = glass.primaryAccent,
                             modifier = Modifier
                                 .size(22.dp)
                                 .align(Alignment.Center)
@@ -273,7 +273,7 @@ fun FoldersScreen(
                             folderToEdit = null
                         }
                     },
-                    colors = ButtonDefaults.buttonColors(containerColor = MercuryViolet)
+                    colors = ButtonDefaults.buttonColors(containerColor = glass.primaryAccent)
                 ) {
                     Text(if (isEditing) "Save" else "Create")
                 }
@@ -338,19 +338,19 @@ fun StatsOverviewSection(
             modifier = Modifier.weight(1f),
             title = "All Notes",
             value = totalNotes.toString(),
-            color = MercuryBlue
+            color = glass.primaryAccent
         )
         StatPillCard(
             modifier = Modifier.weight(1f),
             title = "Pinned",
             value = pinnedNotes.toString(),
-            color = MercuryViolet
+            color = glass.secondaryAccent
         )
         StatPillCard(
             modifier = Modifier.weight(1f),
             title = "Favorites",
             value = favorites.toString(),
-            color = MercuryPink
+            color = glass.secondaryAccent
         )
     }
 }

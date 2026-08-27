@@ -86,10 +86,13 @@ import androidx.compose.ui.unit.sp
 import androidx.fragment.app.FragmentActivity
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.example.R
+import com.example.data.preferences.FontPreset
 import com.example.data.preferences.NoteFontSize
 import com.example.data.preferences.PastelThemePreset
 import com.example.data.preferences.ThemeMode
+import com.example.data.preferences.TranslucencyLevel
 import com.example.ui.components.GlassCard
+import com.example.ui.components.MoltenGlassCard
 import com.example.ui.components.SegmentedThemeControl
 import com.example.ui.theme.MercuryBlue
 import com.example.ui.theme.MercuryPink
@@ -116,7 +119,12 @@ fun SettingsScreen(
     val compactMode by viewModel.compactMode.collectAsStateWithLifecycle()
     val autoSave by viewModel.autoSave.collectAsStateWithLifecycle()
     val fontSize by viewModel.fontSize.collectAsStateWithLifecycle()
+    val fontPreset by viewModel.fontPreset.collectAsStateWithLifecycle()
+    val customFontDisplayName by viewModel.customFontDisplayName.collectAsStateWithLifecycle()
     val reduceTransparency by viewModel.reduceTransparency.collectAsStateWithLifecycle()
+    val translucencyLevel by viewModel.translucencyLevel.collectAsStateWithLifecycle()
+    val ambientBackdropGlow by viewModel.ambientBackdropGlow.collectAsStateWithLifecycle()
+    val highRefreshRateEnabled by viewModel.highRefreshRateEnabled.collectAsStateWithLifecycle()
     val reduceMotion by viewModel.reduceMotion.collectAsStateWithLifecycle()
     val biometricLock by viewModel.biometricLockEnabled.collectAsStateWithLifecycle()
     val deletedCount by viewModel.deletedNotesCount.collectAsStateWithLifecycle()
@@ -127,7 +135,7 @@ fun SettingsScreen(
     var showClearDataDialog by remember { mutableStateOf(false) }
     var pinInput by remember { mutableStateOf("") }
 
-    // Universal File Picker Launcher for Settings
+    // Universal File Picker Launcher for Settings (Notes, Docs, etc.)
     val filePickerLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.GetContent()
     ) { uri: Uri? ->
@@ -135,6 +143,21 @@ fun SettingsScreen(
             val imported = FileImporter.parseImportedUri(context, uri)
             viewModel.importNoteData(imported) { newId ->
                 Toast.makeText(context, "Imported as new note: ${imported.title}", Toast.LENGTH_SHORT).show()
+            }
+        }
+    }
+
+    // Dedicated Font File Picker Launcher (.ttf, .otf)
+    val fontPickerLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.GetContent()
+    ) { uri: Uri? ->
+        if (uri != null) {
+            viewModel.importFontFromUri(uri) { success, result ->
+                if (success) {
+                    Toast.makeText(context, "Applied custom font: $result", Toast.LENGTH_SHORT).show()
+                } else {
+                    Toast.makeText(context, "Font import error: $result", Toast.LENGTH_LONG).show()
+                }
             }
         }
     }
@@ -318,6 +341,30 @@ fun SettingsScreen(
 
                         HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp), color = glass.dividerColor)
 
+                        val displayModes = remember(context) {
+                            val display = if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.R) {
+                                context.display
+                            } else {
+                                val windowManager = context.getSystemService(Context.WINDOW_SERVICE) as android.view.WindowManager
+                                @Suppress("DEPRECATION")
+                                windowManager.defaultDisplay
+                            }
+                            display?.supportedModes?.map { it.refreshRate.toInt() }?.distinct()?.sorted() ?: emptyList()
+                        }
+                        val maxRate = displayModes.maxOrNull() ?: 60
+                        val supportedRatesStr = displayModes.joinToString(", ") { "${it}Hz" }
+
+                        SettingsToggleRow(
+                            icon = Icons.Default.AutoAwesome,
+                            iconColor = Color(0xFFF59E0B),
+                            title = "High Refresh Rate",
+                            subtitle = if (displayModes.size > 1) "Smooth UI at ${maxRate}Hz (Supported: $supportedRatesStr)" else "Requires > 60Hz display support",
+                            checked = highRefreshRateEnabled,
+                            onCheckedChange = { viewModel.setHighRefreshRateEnabled(it) }
+                        )
+
+                        HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp), color = glass.dividerColor)
+
                         SettingsToggleRow(
                             icon = Icons.Default.Animation,
                             iconColor = MercuryPink,
@@ -326,16 +373,59 @@ fun SettingsScreen(
                             checked = reduceTransparency,
                             onCheckedChange = { viewModel.setReduceTransparency(it) }
                         )
+
+                        if (!reduceTransparency) {
+                            HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp), color = glass.dividerColor)
+
+                            Column(modifier = Modifier.padding(horizontal = 16.dp, vertical = 10.dp)) {
+                                Text(
+                                    text = "Glass Translucency Level",
+                                    style = MaterialTheme.typography.titleSmall,
+                                    color = glass.textPrimary,
+                                    fontWeight = FontWeight.SemiBold
+                                )
+                                Spacer(modifier = Modifier.height(10.dp))
+                                SegmentedThemeControl(
+                                    selectedOption = when (translucencyLevel) {
+                                        TranslucencyLevel.CRYSTAL -> 0
+                                        TranslucencyLevel.FROSTED -> 1
+                                        TranslucencyLevel.SOFT -> 2
+                                        TranslucencyLevel.OPAQUE -> 3
+                                    },
+                                    options = listOf("Crystal", "Frosted", "Soft", "Opaque"),
+                                    onSelect = { index ->
+                                        val level = when (index) {
+                                            0 -> TranslucencyLevel.CRYSTAL
+                                            1 -> TranslucencyLevel.FROSTED
+                                            2 -> TranslucencyLevel.SOFT
+                                            else -> TranslucencyLevel.OPAQUE
+                                        }
+                                        viewModel.setTranslucencyLevel(level)
+                                    }
+                                )
+                            }
+
+                            HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp), color = glass.dividerColor)
+
+                            SettingsToggleRow(
+                                icon = Icons.Default.ColorLens,
+                                iconColor = MercuryBlue,
+                                title = "Ambient Backdrop Glow",
+                                subtitle = "Floating aura light blobs behind the UI",
+                                checked = ambientBackdropGlow,
+                                onCheckedChange = { viewModel.setAmbientBackdropGlow(it) }
+                            )
+                        }
                     }
                 }
                 Spacer(modifier = Modifier.height(12.dp))
             }
 
-            // Typography & Dynamic Font Size (FIXED & RESPONSIVE)
+            // Typography, Custom Font & Dynamic Scale
             item {
-                SettingsSectionHeader("Typography & Scale")
+                SettingsSectionHeader("Typography & App Font")
 
-                GlassCard(
+                MoltenGlassCard(
                     modifier = Modifier
                         .fillMaxWidth()
                         .padding(vertical = 4.dp),
@@ -343,13 +433,107 @@ fun SettingsScreen(
                     backgroundColor = glass.cardBackground
                 ) {
                     Column(modifier = Modifier.padding(16.dp)) {
+                        // Font Family / Typeface Selection
                         Row(
                             modifier = Modifier.fillMaxWidth(),
                             horizontalArrangement = Arrangement.SpaceBetween,
                             verticalAlignment = Alignment.CenterVertically
                         ) {
                             Row(verticalAlignment = Alignment.CenterVertically) {
-                                Icon(Icons.Default.FormatSize, contentDescription = null, tint = MercuryViolet)
+                                Icon(Icons.Default.TextFields, contentDescription = null, tint = glass.primaryAccent)
+                                Spacer(modifier = Modifier.width(10.dp))
+                                Column {
+                                    Text(
+                                        text = "App Font Style",
+                                        style = MaterialTheme.typography.titleSmall,
+                                        color = glass.textPrimary,
+                                        fontWeight = FontWeight.SemiBold
+                                    )
+                                    Text(
+                                        text = when {
+                                            fontPreset == FontPreset.CUSTOM && !customFontDisplayName.isNullOrBlank() -> "Custom: $customFontDisplayName"
+                                            else -> fontPreset.displayName
+                                        },
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = glass.secondaryAccent,
+                                        fontWeight = FontWeight.Medium
+                                    )
+                                }
+                            }
+                            if (fontPreset != FontPreset.DEFAULT) {
+                                TextButton(
+                                    onClick = { viewModel.resetToDefaultFont() },
+                                    contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp)
+                                ) {
+                                    Text("Reset", color = glass.secondaryAccent, fontSize = 12.sp)
+                                }
+                            }
+                        }
+
+                        Spacer(modifier = Modifier.height(10.dp))
+
+                        SegmentedThemeControl(
+                            selectedOption = when (fontPreset) {
+                                FontPreset.DEFAULT -> 0
+                                FontPreset.SERIF -> 1
+                                FontPreset.MONOSPACE -> 2
+                                FontPreset.CURSIVE -> 3
+                                FontPreset.CUSTOM -> -1
+                            },
+                            options = listOf("Default", "Serif", "Mono", "Script"),
+                            onSelect = { index ->
+                                val selected = when (index) {
+                                    0 -> FontPreset.DEFAULT
+                                    1 -> FontPreset.SERIF
+                                    2 -> FontPreset.MONOSPACE
+                                    else -> FontPreset.CURSIVE
+                                }
+                                viewModel.setFontPreset(selected)
+                            }
+                        )
+
+                        Spacer(modifier = Modifier.height(12.dp))
+
+                        // Custom Font Importer Button (.ttf / .otf)
+                        Button(
+                            onClick = { fontPickerLauncher.launch("*/*") },
+                            modifier = Modifier.fillMaxWidth(),
+                            shape = RoundedCornerShape(12.dp),
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = glass.searchBarBackground,
+                                contentColor = glass.textPrimary
+                            ),
+                            border = androidx.compose.foundation.BorderStroke(1.dp, glass.cardBorder)
+                        ) {
+                            Icon(
+                                Icons.Default.AttachFile,
+                                contentDescription = null,
+                                tint = glass.primaryAccent,
+                                modifier = Modifier.size(18.dp)
+                            )
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text(
+                                text = if (fontPreset == FontPreset.CUSTOM && !customFontDisplayName.isNullOrBlank())
+                                    "Change Font (Current: $customFontDisplayName)"
+                                else
+                                    "Import Font (.ttf, .otf) & Set as App Font",
+                                fontSize = 13.sp,
+                                fontWeight = FontWeight.SemiBold
+                            )
+                        }
+
+                        Spacer(modifier = Modifier.height(16.dp))
+                        HorizontalDivider(color = glass.dividerColor)
+                        Spacer(modifier = Modifier.height(14.dp))
+
+                        // Font Scaling
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Icon(Icons.Default.FormatSize, contentDescription = null, tint = glass.primaryAccent)
                                 Spacer(modifier = Modifier.width(10.dp))
                                 Text(
                                     text = "Dynamic Font Scaling",
@@ -361,12 +545,12 @@ fun SettingsScreen(
                             Text(
                                 text = fontSize.displayName,
                                 style = MaterialTheme.typography.labelMedium,
-                                color = MercuryViolet,
+                                color = glass.primaryAccent,
                                 fontWeight = FontWeight.Bold
                             )
                         }
 
-                        Spacer(modifier = Modifier.height(12.dp))
+                        Spacer(modifier = Modifier.height(10.dp))
 
                         SegmentedThemeControl(
                             selectedOption = when (fontSize) {
@@ -389,16 +573,17 @@ fun SettingsScreen(
 
                         Spacer(modifier = Modifier.height(12.dp))
 
-                        // Live Preview Box showing the scaled font
+                        // Live Preview Box showing the scaled and styled font
                         Box(
                             modifier = Modifier
                                 .fillMaxWidth()
                                 .clip(RoundedCornerShape(12.dp))
                                 .background(glass.searchBarBackground)
+                                .border(1.dp, glass.cardBorder, RoundedCornerShape(12.dp))
                                 .padding(12.dp)
                         ) {
                             Text(
-                                text = "Preview: The quick brown fox jumps over the lazy dog.",
+                                text = "Preview: The quick brown fox jumps over the lazy dog. 12345",
                                 style = MaterialTheme.typography.bodyMedium,
                                 color = glass.textPrimary
                             )
@@ -536,7 +721,7 @@ fun SettingsScreen(
                             icon = Icons.Default.Info,
                             iconColor = MercuryPink,
                             title = "About Mercurynotes",
-                            subtitle = "Made with ❤️ by Rahul Shah",
+                            subtitle = "Version 1.0.0 • Architecture & Features",
                             onClick = { showAboutDialog = true }
                         )
                     }
@@ -694,11 +879,11 @@ fun SettingsScreen(
             title = {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Image(
-                        painter = painterResource(id = R.drawable.mercurynotes_icon),
+                        painter = painterResource(id = R.drawable.mercurynotes_logo_1787768712898),
                         contentDescription = "Logo",
                         modifier = Modifier
                             .size(36.dp)
-                            .clip(RoundedCornerShape(10.dp)),
+                            .clip(CircleShape),
                         contentScale = ContentScale.Crop
                     )
                     Spacer(modifier = Modifier.width(10.dp))
@@ -847,7 +1032,7 @@ fun SettingsToggleRow(
             onCheckedChange = onCheckedChange,
             colors = SwitchDefaults.colors(
                 checkedThumbColor = Color.White,
-                checkedTrackColor = MercuryViolet,
+                checkedTrackColor = glass.primaryAccent,
                 uncheckedThumbColor = glass.textMuted,
                 uncheckedTrackColor = glass.searchBarBackground
             )

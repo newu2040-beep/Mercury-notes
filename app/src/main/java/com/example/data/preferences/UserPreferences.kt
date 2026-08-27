@@ -25,6 +25,29 @@ enum class NoteFontSize(val displayName: String, val scale: Float) {
     EXTRA_LARGE("Extra Large", 1.35f)
 }
 
+enum class FontPreset(val id: String, val displayName: String) {
+    DEFAULT("default", "System Default (Sans)"),
+    SERIF("serif", "Elegant Serif"),
+    MONOSPACE("monospace", "Modern Monospace"),
+    CURSIVE("cursive", "Handwritten / Script"),
+    CUSTOM("custom", "Imported Custom Font")
+}
+
+enum class TranslucencyLevel(
+    val id: String,
+    val displayName: String,
+    val darkCardAlpha: Float,
+    val lightCardAlpha: Float,
+    val navAlpha: Float,
+    val glassBorderAlpha: Float,
+    val description: String
+) {
+    CRYSTAL("crystal", "Crystal (Ultra)", 0.42f, 0.52f, 0.65f, 0.45f, "Ultra-translucent glass with deep ambient light bleed-through"),
+    FROSTED("frosted", "Frosted Glass", 0.70f, 0.78f, 0.85f, 0.35f, "Balanced frosted acrylic glass with shimmering specular sheen"),
+    SOFT("soft", "Soft Glass", 0.85f, 0.90f, 0.93f, 0.25f, "Subtle translucent depth for high readability"),
+    OPAQUE("opaque", "Solid Opaque", 1.00f, 1.00f, 1.00f, 0.15f, "Solid high-contrast opaque surfaces with no background bleed")
+}
+
 class UserPreferences(context: Context) {
     private val prefs: SharedPreferences = context.getSharedPreferences("mercury_prefs", Context.MODE_PRIVATE)
 
@@ -77,6 +100,25 @@ class UserPreferences(context: Context) {
         }
         set(value) = prefs.edit().putString("font_size", value.name).apply()
 
+    var fontPreset: FontPreset
+        get() {
+            val value = prefs.getString("font_preset", FontPreset.DEFAULT.name) ?: FontPreset.DEFAULT.name
+            return try {
+                FontPreset.valueOf(value)
+            } catch (e: Exception) {
+                FontPreset.DEFAULT
+            }
+        }
+        set(value) = prefs.edit().putString("font_preset", value.name).apply()
+
+    var customFontPath: String?
+        get() = prefs.getString("custom_font_path", null)
+        set(value) = prefs.edit().putString("custom_font_path", value).apply()
+
+    var customFontDisplayName: String?
+        get() = prefs.getString("custom_font_display_name", null)
+        set(value) = prefs.edit().putString("custom_font_display_name", value).apply()
+
     var customFontName: String?
         get() = prefs.getString("custom_font_name", null)
         set(value) = prefs.edit().putString("custom_font_name", value).apply()
@@ -84,6 +126,25 @@ class UserPreferences(context: Context) {
     var reduceTransparency: Boolean
         get() = prefs.getBoolean("reduce_transparency", false)
         set(value) = prefs.edit().putBoolean("reduce_transparency", value).apply()
+
+    var translucencyLevel: TranslucencyLevel
+        get() {
+            val value = prefs.getString("translucency_level", TranslucencyLevel.FROSTED.name) ?: TranslucencyLevel.FROSTED.name
+            return try {
+                TranslucencyLevel.valueOf(value)
+            } catch (e: Exception) {
+                TranslucencyLevel.FROSTED
+            }
+        }
+        set(value) = prefs.edit().putString("translucency_level", value.name).apply()
+
+    var ambientBackdropGlow: Boolean
+        get() = prefs.getBoolean("ambient_backdrop_glow", true)
+        set(value) = prefs.edit().putBoolean("ambient_backdrop_glow", value).apply()
+
+    var highRefreshRateEnabled: Boolean
+        get() = prefs.getBoolean("high_refresh_rate", false)
+        set(value) = prefs.edit().putBoolean("high_refresh_rate", value).apply()
 
     var reduceMotion: Boolean
         get() = prefs.getBoolean("reduce_motion", false)

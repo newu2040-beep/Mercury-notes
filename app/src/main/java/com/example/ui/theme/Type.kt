@@ -2,11 +2,45 @@ package com.example.ui.theme
 
 import androidx.compose.material3.Typography
 import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.font.Font
 import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.sp
+import com.example.data.preferences.FontPreset
+import java.io.File
 
-fun createScaledTypography(scale: Float = 1.0f, customFontFamily: FontFamily = FontFamily.SansSerif): Typography {
+fun resolveAppFontFamily(preset: FontPreset, customFontPath: String?): FontFamily {
+    return when (preset) {
+        FontPreset.DEFAULT -> FontFamily.SansSerif
+        FontPreset.SERIF -> FontFamily.Serif
+        FontPreset.MONOSPACE -> FontFamily.Monospace
+        FontPreset.CURSIVE -> FontFamily.Cursive
+        FontPreset.CUSTOM -> {
+            if (!customFontPath.isNullOrBlank()) {
+                val file = File(customFontPath)
+                if (file.exists() && file.canRead()) {
+                    try {
+                        FontFamily(
+                            Font(file = file, weight = FontWeight.Normal, style = FontStyle.Normal)
+                        )
+                    } catch (e: Exception) {
+                        FontFamily.SansSerif
+                    }
+                } else {
+                    FontFamily.SansSerif
+                }
+            } else {
+                FontFamily.SansSerif
+            }
+        }
+    }
+}
+
+fun createScaledTypography(
+    scale: Float = 1.0f,
+    customFontFamily: FontFamily = FontFamily.SansSerif
+): Typography {
     val s = scale.coerceIn(0.75f, 1.6f)
     return Typography(
         displayLarge = TextStyle(

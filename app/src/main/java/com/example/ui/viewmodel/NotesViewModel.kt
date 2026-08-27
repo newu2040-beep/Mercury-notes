@@ -8,6 +8,7 @@ import com.example.data.db.MercuryDatabase
 import com.example.data.model.ChecklistItem
 import com.example.data.model.FolderEntity
 import com.example.data.model.NoteEntity
+import com.example.data.preferences.FontPreset
 import com.example.data.preferences.NoteFontSize
 import com.example.data.preferences.PastelThemePreset
 import com.example.data.preferences.ThemeMode
@@ -69,8 +70,26 @@ class NotesViewModel(application: Application) : AndroidViewModel(application) {
     private val _fontSize = MutableStateFlow(userPrefs.fontSize)
     val fontSize: StateFlow<NoteFontSize> = _fontSize.asStateFlow()
 
+    private val _fontPreset = MutableStateFlow(userPrefs.fontPreset)
+    val fontPreset: StateFlow<FontPreset> = _fontPreset.asStateFlow()
+
+    private val _customFontPath = MutableStateFlow(userPrefs.customFontPath)
+    val customFontPath: StateFlow<String?> = _customFontPath.asStateFlow()
+
+    private val _customFontDisplayName = MutableStateFlow(userPrefs.customFontDisplayName)
+    val customFontDisplayName: StateFlow<String?> = _customFontDisplayName.asStateFlow()
+
     private val _reduceTransparency = MutableStateFlow(userPrefs.reduceTransparency)
     val reduceTransparency: StateFlow<Boolean> = _reduceTransparency.asStateFlow()
+
+    private val _translucencyLevel = MutableStateFlow(userPrefs.translucencyLevel)
+    val translucencyLevel: StateFlow<com.example.data.preferences.TranslucencyLevel> = _translucencyLevel.asStateFlow()
+
+    private val _ambientBackdropGlow = MutableStateFlow(userPrefs.ambientBackdropGlow)
+    val ambientBackdropGlow: StateFlow<Boolean> = _ambientBackdropGlow.asStateFlow()
+
+    private val _highRefreshRateEnabled = MutableStateFlow(userPrefs.highRefreshRateEnabled)
+    val highRefreshRateEnabled: StateFlow<Boolean> = _highRefreshRateEnabled.asStateFlow()
 
     private val _reduceMotion = MutableStateFlow(userPrefs.reduceMotion)
     val reduceMotion: StateFlow<Boolean> = _reduceMotion.asStateFlow()
@@ -329,9 +348,86 @@ class NotesViewModel(application: Application) : AndroidViewModel(application) {
         _fontSize.value = size
     }
 
+    fun setFontPreset(preset: FontPreset) {
+        userPrefs.fontPreset = preset
+        _fontPreset.value = preset
+    }
+
+    fun setCustomFont(path: String?, displayName: String?) {
+        userPrefs.customFontPath = path
+        userPrefs.customFontDisplayName = displayName
+        _customFontPath.value = path
+        _customFontDisplayName.value = displayName
+        if (!path.isNullOrBlank()) {
+            setFontPreset(FontPreset.CUSTOM)
+        }
+    }
+
+    fun resetToDefaultFont() {
+        userPrefs.fontPreset = FontPreset.DEFAULT
+        userPrefs.customFontPath = null
+        userPrefs.customFontDisplayName = null
+        _fontPreset.value = FontPreset.DEFAULT
+        _customFontPath.value = null
+        _customFontDisplayName.value = null
+    }
+
+    fun importFontFromUri(uri: android.net.Uri, onComplete: ((Boolean, String) -> Unit)? = null) {
+        viewModelScope.launch(Dispatchers.IO) {
+            try {
+                val context = getApplication<Application>()
+                val fileName = com.example.util.FileImporter.getFileName(context, uri)
+                val fontsDir = java.io.File(context.filesDir, "fonts")
+                if (!fontsDir.exists()) {
+                    fontsDir.mkdirs()
+                }
+                val destFile = java.io.File(fontsDir, fileName)
+                context.contentResolver.openInputStream(uri)?.use { input ->
+                    java.io.FileOutputStream(destFile).use { output ->
+                        input.copyTo(output)
+                    }
+                }
+                if (destFile.exists() && destFile.length() > 0) {
+                    val displayName = fileName.substringBeforeLast(".")
+                    setCustomFont(destFile.absolutePath, displayName)
+                    onComplete?.invoke(true, displayName)
+                } else {
+                    onComplete?.invoke(false, "Failed to copy font file")
+                }
+            } catch (e: Exception) {
+                onComplete?.invoke(false, e.localizedMessage ?: "Unknown error")
+            }
+        }
+    }
+
     fun setReduceTransparency(enabled: Boolean) {
         userPrefs.reduceTransparency = enabled
         _reduceTransparency.value = enabled
+        if (enabled) {
+            _translucencyLevel.value = com.example.data.preferences.TranslucencyLevel.OPAQUE
+        }
+    }
+
+    fun setTranslucencyLevel(level: com.example.data.preferences.TranslucencyLevel) {
+        userPrefs.translucencyLevel = level
+        _translucencyLevel.value = level
+        if (level == com.example.data.preferences.TranslucencyLevel.OPAQUE) {
+            userPrefs.reduceTransparency = true
+            _reduceTransparency.value = true
+        } else {
+            userPrefs.reduceTransparency = false
+            _reduceTransparency.value = false
+        }
+    }
+
+    fun setAmbientBackdropGlow(enabled: Boolean) {
+        userPrefs.ambientBackdropGlow = enabled
+        _ambientBackdropGlow.value = enabled
+    }
+
+    fun setHighRefreshRateEnabled(enabled: Boolean) {
+        userPrefs.highRefreshRateEnabled = enabled
+        _highRefreshRateEnabled.value = enabled
     }
 
     fun setReduceMotion(enabled: Boolean) {
